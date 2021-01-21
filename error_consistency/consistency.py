@@ -1,6 +1,7 @@
 from error_consistency.utils import to_numpy
 import numpy as np
 
+from dataclasses import dataclass
 from numpy import ndarray
 from pandas import DataFrame, Series
 from sklearn.model_selection import KFold, GroupKFold, StratifiedKFold
@@ -17,7 +18,43 @@ from error_consistency.model import Model, ModelFactory
 PandasData = Union[DataFrame, Series]
 
 
-class ErrorConsistency:
+@dataclass(eq=False)
+class ConsistencyResults:
+    """Holds results from evaluating error consistency.
+
+    Properties
+    ----------
+    consistencies: ndarray
+        A one-dimensional numpy array all calculated error consistencies.
+
+    consistency_matrices: List[ndarray]
+        Given n repetitions of the k-fold process, a list of n square matrices of size k x k, with
+        error consistencies between folds on the upper diagonal, and zeroes else. That is, if we
+        denote one of these matrices as A, then `A[i,j] == 0` if i >= j, and `A[i, j]` is equal to
+        the error consistency between the folds i and j, for i, j in {0, 1, ..., k - 1} .
+
+    scores: Optional[ndarray] = None
+        A one-dimensional numpy array of all calculated accuracies.
+
+    error_arrays: Optional[List[ndarray]] = None
+        A list of the boolean error arrays (`y_pred_i == y_test` for fold `i`) for all repetitions.
+
+    predictions: Optional[List[ndarray]] = None
+        A list of the actual predicted values across all reptitions and folds.
+
+    models: Optional[List[Ant]] = None
+        A list of all fitted models across repetitions and folds.
+    """
+
+    consistencies: ndarray
+    consistency_matrices: List[ndarray]
+    scores: Optional[ndarray] = None
+    error_arrays: Optional[List[ndarray]] = None
+    predictions: Optional[List[ndarray]] = None
+    models: Optional[List[Any]] = None
+
+
+class ErrorConsistencyKFold:
     """Compute error consistencies for a classifier.
 
     Parameters
@@ -67,6 +104,11 @@ class ErrorConsistency:
         the first axis is assumed to be the sample dimension. If your fit method requires a
         different sample dimension (e.g. y is a one-hot encoded array), you can specify this
         in `y_sample_dim`.
+
+    folds: int = 5
+        How many folds to use for validating error consistency. Note that if there are no heldout
+        test predictors and targets, then this results in folds*(folds-1)/2 consistency values.
+
 
     model_args: Optional[Dict[str, Any]]
         Any arguments that are required each time to construct a fresh instance of the model (see
@@ -131,8 +173,7 @@ class ErrorConsistency:
         model: Any,
         x: ndarray,
         y: ndarray,
-        x_test: ndarray = None,
-        y_test: ndarray = None,
+        folds: int = 5,
         model_args: Optional[Dict[str, Any]] = None,
         fit_args: Optional[Dict[str, Any]] = None,
         fit_args_x_y: Optional[Tuple[str, str]] = None,
@@ -144,14 +185,12 @@ class ErrorConsistency:
     ) -> None:
         self.model: Model
         self.stratify: bool
+        self.folds: int
         self.x: ndarray
         self.y: ndarray
+        # if user is using DataFrames, save reference to these for the variable names
         self.x_df: Optional[PandasData]
         self.y_df: Optional[PandasData]
-        self.x_test: ndarray
-        self.y_test: ndarray
-        self.x_test_df: Optional[PandasData]
-        self.y_test_df: Optional[PandasData]
 
         self.model_factory = ModelFactory(
             model,
@@ -164,9 +203,77 @@ class ErrorConsistency:
             y_sample_dim,
         )
         self.stratify = stratify
+        self.folds = folds
 
         self.x, self.y, self.x_df, self.y_df = self.__save_x_y(x, y)
-        self.x_test, self.y_test, self.x_test_df, self.y_test_df = self.__save_x_y(x_test, y_test)
+
+    def evaluate(
+        self,
+        x_test: ndarray = None,
+        y_test: ndarray = None,
+        repetitions: int = 5,
+        compute_scores: bool = True,
+        save_error_arrays: bool = False,
+        save_predictions: bool = False,
+        save_models: bool = False,
+        seed: int = None,
+    ) -> ConsistencyResults:
+        """Evaluate the error consistency of the classifier.
+
+        Parameters
+        ----------
+        x_test: Optional[Union[List, pandas.DataFrame, pandas.Series, numpy.ndarray]] = None
+            ArrayLike object containing holdout predictor samples that the model will never be
+            trained or fitted on. Must be have a format identical to that of `x` passed into
+            constructor (see above).
+
+        y_test: Optional[Union[List, pandas.DataFrame, pandas.Series, numpy.ndarray]] = None
+            ArrayLike object containing holdout target values that the model will never be trained
+            or fitted on. Must be have a format identical to that of `x` passed into constructor
+            (see above).
+
+        repetitions: int = 5
+            How many times to repeat the k-fold process. Yields `k*repetitions` error consistencies
+            if both `x_test` and `y_test` are proided, and `repetitions*(repititions - 1)/2`
+            consistencies otherwise. Note that if both `x_test` and `y_test` are not provided, then
+            setting repetitions to 1 will raise an error, since this results in insufficient arrays
+            to compare errors.
+
+        compute_scores: bool = True
+            If True (default) also compute accuracy scores for each fold and save them in
+            `results.scores`. If False, `x_test` and `y_test` are not None, only compute predictions
+            on `x_test`, and not testing subsets of each k-fold partition. Useful if prediction is
+            expensive or otherwise not needed.
+
+        save_error_arrays: bool = False,
+            If True also save the boolean arrays indicating the error locations of each fold in
+            `results.error_arrays`. If False (default), leave this property empty in the results.
+
+        save_predictions: bool = False
+            If True also save the predicted target values of each fold in `results.predictions`.
+            If False (default), leave this property empty in the results.
+
+        save_models: bool = False,
+            If True also save the fitted models of each fold in `results.models`.
+            If False (default), leave this property empty in the results.
+
+        seed: int = None,
+
+
+        Returns
+        -------
+        results: ConsistencyResults
+            A dataclass with properties:
+
+                consistencies: ndarray
+                consistency_matrices: List[ndarray]
+                scores: Optional[ndarray] = None
+                error_arrays: Optional[List[ndarray]] = None
+                predictions: Optional[List[ndarray]] = None
+                models: Optional[List[Any]] = None
+        """
+        self.x_test, self.y_test = self.__save_x_y(x_test, y_test)[0:2]
+        raise NotImplementedError()
 
     @staticmethod
     def __save_x_y(x: ndarray, y: ndarray) -> Tuple[ndarray, ndarray, PandasData, PandasData]:
@@ -175,3 +282,7 @@ class ErrorConsistency:
         x = to_numpy(x)
         y = to_numpy(y)
         return x, y, x_df, y_df
+
+
+class ErrorConsistencyMonteCarlo:
+    """Calculate error consistency using repeated random train/test splits."""
