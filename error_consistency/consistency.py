@@ -1,8 +1,10 @@
-from error_consistency.utils import to_numpy
 import numpy as np
+import random
+import sys
 
 from dataclasses import dataclass
 from numpy import ndarray
+from numpy.random import SeedSequence, MT19937, RandomState
 from pandas import DataFrame, Series
 from sklearn.model_selection import KFold, GroupKFold, StratifiedKFold
 from sklearn.cluster import KMeans
@@ -13,9 +15,11 @@ from typing import cast, no_type_check
 from typing_extensions import Literal
 
 from error_consistency.model import Model, ModelFactory
+from error_consistency.utils import to_numpy
 
 
 PandasData = Union[DataFrame, Series]
+Shape = Tuple[int, ...]
 
 
 @dataclass(eq=False)
@@ -105,10 +109,8 @@ class ErrorConsistencyKFold:
         different sample dimension (e.g. y is a one-hot encoded array), you can specify this
         in `y_sample_dim`.
 
-    folds: int = 5
-        How many folds to use for validating error consistency. Note that if there are no heldout
-        test predictors and targets, then this results in folds*(folds-1)/2 consistency values.
-
+    n_splits: int = 5
+        How many folds to use for validating error consistency.
 
     model_args: Optional[Dict[str, Any]]
         Any arguments that are required each time to construct a fresh instance of the model (see
@@ -163,9 +165,10 @@ class ErrorConsistencyKFold:
         The axis or dimension along which samples are indexed. Needed for splitting y into
         partitions for k-fold only if the target is e.g. one-hot encoded or dummy-coded.
 
-    validate_model_argument: bool = True
-        If True, create an unused instance of the model to check if it has appropriate methods
-        (e.g. `.fit` or `.train` and `.predict` or `.test`)
+    onehot_y: bool = True
+        Only relevant for two-dimensional `y`. Set to True if `y` is a one-hot array with samples
+        indexed by `y_sample_dim`. Set to False if `y` is dummy-coded.
+
     """
 
     def __init__(
@@ -173,7 +176,7 @@ class ErrorConsistencyKFold:
         model: Any,
         x: ndarray,
         y: ndarray,
-        folds: int = 5,
+        n_splits: int = 5,
         model_args: Optional[Dict[str, Any]] = None,
         fit_args: Optional[Dict[str, Any]] = None,
         fit_args_x_y: Optional[Tuple[str, str]] = None,
@@ -182,12 +185,15 @@ class ErrorConsistencyKFold:
         stratify: bool = False,
         x_sample_dim: int = 0,
         y_sample_dim: int = 0,
+        onehot_y: bool = True,
     ) -> None:
         self.model: Model
         self.stratify: bool
-        self.folds: int
+        self.n_splits: int
         self.x: ndarray
         self.y: ndarray
+        self.x_sample_dim: int
+        self.y_sample_dim: int
         # if user is using DataFrames, save reference to these for the variable names
         self.x_df: Optional[PandasData]
         self.y_df: Optional[PandasData]
@@ -203,9 +209,17 @@ class ErrorConsistencyKFold:
             y_sample_dim,
         )
         self.stratify = stratify
-        self.folds = folds
+        if n_splits < 2:
+            raise ValueError("Must have more than one split for K-fold.")
+        self.n_splits = n_splits
+        if not onehot_y:
+            raise NotImplementedError("Dummy-coded `y` currently not implemented.")
+        self.onehot_y = onehot_y
 
         self.x, self.y, self.x_df, self.y_df = self.__save_x_y(x, y)
+        self.x_transpose_shape, self.y_transpose_shape, self.x_sample_dim, self.y_sample_dim = self.__save_dims(
+            x, y, x_sample_dim, y_sample_dim
+        )
 
     def evaluate(
         self,
@@ -259,7 +273,6 @@ class ErrorConsistencyKFold:
 
         seed: int = None,
 
-
         Returns
         -------
         results: ConsistencyResults
@@ -272,7 +285,43 @@ class ErrorConsistencyKFold:
                 predictions: Optional[List[ndarray]] = None
                 models: Optional[List[Any]] = None
         """
+
+        def array_indexer(array: ndarray, idx: ndarray) -> ndarray:
+            # grotesque but hey, we need to index into a position programmatically
+            colons = [":" for _ in range(self.x.ndim)]
+            colons[self.x_sample_dim] = "idx"
+            idx_string = f"{','.join(colons)}"
+            return eval(f"array[{idx_string}]")
+
         self.x_test, self.y_test = self.__save_x_y(x_test, y_test)[0:2]
+        if seed is not None:
+            random.seed(seed)
+            rng = np.random.default_rng(seed)
+            seeds = rng.integers(0, sys.maxsize, repetitions)
+        else:
+            rng = np.random.default_rng()
+            seeds = rng.integers(0, sys.maxsize, repetitions)
+
+        kfolds = [KFold(n_splits=self.n_splits, shuffle=True, random_state=seed) for seed in seeds]
+
+        consistencies: List[float] = []
+        consistency_matrices: List[ndarray] = []
+        scores: Optional[ndarray] = [] if compute_scores else None
+        error_arrays: Optional[List[ndarray]] = [] if save_error_arrays else None
+        predictions: Optional[List[ndarray]] = [] if save_predictions else None
+        models: Optional[List[Any]] = [] if save_models else None
+        idx = np.arange(0, int(self.x.shape[self.x_sample_dim]), dtype=int)
+        for kfold in kfolds:
+            train_idx, test_idx = kfold.split(idx)
+            x_train_fold = array_indexer(self.x, train_idx)
+            y_train_fold = array_indexer(self.y, train_idx)
+
+            x_test_fold = array_indexer(self.x, test_idx)
+            y_test_fold = array_indexer(self.y, test_idx)
+            model = self.model_factory.create()
+            model.fit(x_train_fold, y_train_fold)
+            model.predict()
+
         raise NotImplementedError()
 
     @staticmethod
@@ -281,7 +330,37 @@ class ErrorConsistencyKFold:
         y_df = y if isinstance(y, DataFrame) or isinstance(y, Series) else None
         x = to_numpy(x)
         y = to_numpy(y)
+        if y.ndim > 2:
+            raise ValueError("Target `y` can only be 1-dimensional or two-dimensional.")
+        if y.ndim == 2:
+            uniques = np.unique(y.ravel()).astype(int)
+            if not np.array_equal(uniques, [0, 1]):
+                raise ValueError
         return x, y, x_df, y_df
+
+    @staticmethod
+    def __save_dims(
+        x: ndarray, y: ndarray, x_sample_dim: int, y_sample_dim: int
+    ) -> Tuple[Shape, Shape, int, int]:
+        # we need to convert the sample dimensions to positive values to construct transpose shapes
+        if y_sample_dim > 1 or y_sample_dim < -1:
+            raise ValueError(
+                "Invalid `y_sample_dim`. Must be 0 for one-dimensional `y`, "
+                "and either 1 or -1 for two-dimensional `y`."
+            )
+        y_dim = int(np.abs(y_sample_dim))  # 1, -1 have same behaviour if dim=2, abs(0) is 0
+
+        if (x_sample_dim > x.ndim - 1) or (x_sample_dim < -x.ndim):
+            raise ValueError(
+                "Invalid `x_sample_dim`. `x_sample_dim` must satisfy "
+                "`x.ndim - 1 < x_sample_dim < -x.ndim`"
+            )
+        x_dim = x.ndim - x_sample_dim if x_sample_dim < 0 else x_sample_dim
+
+        xdim_indices = list(range(int(x.ndim)))
+        x_transpose_shape = (x_dim, *xdim_indices[:x_dim], *xdim_indices[x_dim + 1 :])
+        y_transpose_shape = y.shape if y.ndim != 2 else ((0, 1) if y_dim == 1 else (1, 0))
+        return x_transpose_shape, y_transpose_shape, x_dim, y_dim
 
 
 class ErrorConsistencyMonteCarlo:
