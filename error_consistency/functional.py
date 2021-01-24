@@ -1,3 +1,4 @@
+from decimal import ConversionSyntax, DivisionByZero
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing import cast, no_type_check
 from typing_extensions import Literal
@@ -17,11 +18,16 @@ ArrayLike = Union[ndarray, DataFrame, Series]
 
 
 def error_consistencies(
-    y_preds: List[ndarray], y_true: ndarray, sample_dim: int = 0
-) -> Tuple[List[ndarray], ndarray]:
+    y_preds: List[ndarray],
+    y_true: ndarray,
+    sample_dim: int = 0,
+    empty_unions: Literal["nan", "drop", "error", "warn"] = "nan",
+) -> Tuple[ndarray, ndarray]:
     """Get the error consistency for a list of predictions."""
     # y_preds must be (reps, n_samples), y_true must be (n_samples,) or (n_samples, 1) or
     # (n_samples, n_features)
+    if empty_unions not in ["drop", "nan", "error", "warn"]:
+        raise ValueError("Invalid option for handling empty unions.")
     if not isinstance(y_preds, list) or len(y_preds) < 2:
         raise ValueError("`y_preds` must be a list of predictions with length > 1.")
 
@@ -30,16 +36,36 @@ def error_consistencies(
     for y_pred in y_preds:
         y_errs.append(get_y_error(y_pred, y_true, sample_dim))
 
+    n_flubs = np.sum([np.all(e) for e in y_errs])  # a flub is where all predictions are wrong
+    if n_flubs > 1:
+        if empty_unions == "warn":
+            warn(
+                "Two or more of your predictions are all in error. These will create undefined error consistencies for those pairings"
+            )
+        if empty_unions == "error":
+            raise ZeroDivisionError(
+                "Two or more of your predictions are all in error. These will create undefined error consistencies for those pairings"
+            )
+
     consistencies, matrix = [], -np.ones([len(y_preds), len(y_preds)], dtype=float)
+    matrix = np.eye(len(y_preds), dtype=float)
+    matrix[matrix == 0] = np.nan
     for i, err_i in enumerate(y_errs):
         for j, err_j in enumerate(y_errs):
             if i >= j:
                 continue
-            score = np.sum(err_i & err_j) / np.sum(err_i | err_j)
+            union = np.sum(err_i | err_j)
+            if union == 0:
+                if empty_unions == "drop":
+                    continue
+                elif empty_unions == "nan":
+                    consistencies.append(np.nan)
+                    continue
+            score = np.sum(err_i & err_j) / union
             consistencies.append(score)
-            matrix[i, j] = score
+            matrix[i, j] = matrix[j, i] = score
 
-    return consistencies, matrix
+    return np.array(consistencies), matrix
 
 
 def get_y_error(y_pred: ndarray, y_true: ndarray, sample_dim: int = 0) -> ndarray:
@@ -50,7 +76,7 @@ def get_y_error(y_pred: ndarray, y_true: ndarray, sample_dim: int = 0) -> ndarra
         raise ValueError("`sample_dim` must be an integer in the set {0, 1, -1}")
 
     if y_pred.ndim == 1:
-        return y_pred.ravel().astype(int) == y_true.ravel().astype(int)
+        return y_pred.ravel().astype(int) != y_true.ravel().astype(int)
     if y_pred.ndim == 2:
         label_dim = 1 - sample_dim
         return ~np.alltrue(y_pred.astype(int) == y_true.astype(int), axis=label_dim)
