@@ -1,5 +1,6 @@
 from functools import reduce
 from itertools import combinations
+from multiprocessing import cpu_count
 from typing import List, Tuple, Union
 from warnings import warn
 
@@ -7,6 +8,8 @@ import numpy as np
 from numba import prange, jit
 from numpy import ndarray
 from pandas import DataFrame, Series
+from typing import Optional
+from tqdm.contrib.concurrent import process_map
 from typing_extensions import Literal
 from tqdm import tqdm
 
@@ -94,26 +97,63 @@ def error_consistencies_slow(
     return np.array(consistencies), matrix
 
 
-def loo_consistencies(y_errs: List[ndarray], empty_unions: UnionHandling = "zero") -> ndarray:
-    loo_sets = combinations(y_errs, len(y_errs) - 1)  # leave-one out
-    consistencies = []
-    for lset in loo_sets:
-        numerator = np.sum(intersection(list(lset)))
-        denom = np.sum(union(list(lset)))
-        if denom == 0:
-            if empty_unions == "drop":
-                continue
-            elif empty_unions == "nan":
-                consistencies.append(np.nan)
-                continue
-            elif empty_unions == "zero":
-                consistencies.append(0.0)
-                continue
-            elif empty_unions == "+1":
-                denom += 1.0
-            else:
-                raise ValueError("Unreachable!")
-        consistencies.append(numerator / denom)
+def loo_loop(args: Tuple[ndarray, UnionHandling]) -> Optional[ndarray]:
+    lsets, empty_unions = args
+    numerator = np.sum(intersection(list(lsets)))
+    denom = np.sum(union(list(lsets)))
+    if denom == 0:
+        if empty_unions == "drop":
+            return None
+        elif empty_unions == "nan":
+            return None
+        elif empty_unions == "zero":
+            return 0.0
+        elif empty_unions == "+1":
+            denom += 1.0
+        else:
+            raise ValueError("Unreachable!")
+    return numerator / denom
+
+
+def loo_consistencies(
+    y_errs: List[ndarray], empty_unions: UnionHandling = "zero", parallel: bool = False
+) -> ndarray:
+    L = len(y_errs)
+    loo_sets = combinations(y_errs, L - 1)  # leave-one out
+    if parallel:
+        args = [(lsets, empty_unions) for lsets in loo_sets]
+        # https://stackoverflow.com/questions/53751050/python-multiprocessing-understanding-logic-behind-chunksize
+        consistencies = process_map(
+            loo_loop,
+            args,
+            max_workers=cpu_count(),
+            chunksize=divmod(L, cpu_count() * 20)[0],
+            desc="Computing leave-one-out error consistencies",
+            total=L,
+        )
+        if empty_unions == "drop":
+            consistencies = np.array(filter(lambda c: c is None, consistencies))
+        if empty_unions == "nan":
+            consistencies = np.array(map(lambda c: np.nan if c is None else c, consistencies))
+    else:
+        consistencies = []
+        for lset in tqdm(loo_sets, total=L, desc="Computing leave-one-out error consistencies"):
+            numerator = np.sum(intersection(list(lset)))
+            denom = np.sum(union(list(lset)))
+            if denom == 0:
+                if empty_unions == "drop":
+                    continue
+                elif empty_unions == "nan":
+                    consistencies.append(np.nan)
+                    continue
+                elif empty_unions == "zero":
+                    consistencies.append(0.0)
+                    continue
+                elif empty_unions == "+1":
+                    denom += 1.0
+                else:
+                    raise ValueError("Unreachable!")
+            consistencies.append(numerator / denom)
     return np.array(consistencies)
 
 
@@ -147,6 +187,7 @@ def error_consistencies(
     y_true: ndarray,
     sample_dim: int = 0,
     empty_unions: UnionHandling = "zero",
+    loo_parallel: bool = False,
     turbo: bool = False,
 ) -> Tuple[ndarray, ndarray, ndarray, ndarray, ndarray]:
     """Get the error consistency for a list of predictions."""
@@ -175,10 +216,14 @@ def error_consistencies(
 
     unpredictable_set = intersection(y_errs)
     predictable_set = union(y_errs)
-    loocs = loo_consistencies(y_errs, empty_unions)
+    print("Computing Leave-One-Out error consistencies ... ", end="", flush=True)
+    loocs = loo_consistencies(y_errs, empty_unions, loo_parallel)
+    print("done.")
 
     if turbo:
+        print("Computing pairwise error consistencies ... ", end="", flush=True)
         consistencies, matrix = error_consistencies_numba(np.array(y_errs), empty_unions)
+        print("done.")
     else:
         consistencies, matrix = error_consistencies_slow(y_errs, empty_unions)
     return (np.array(consistencies), matrix, unpredictable_set, predictable_set, loocs)

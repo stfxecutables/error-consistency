@@ -1,3 +1,4 @@
+from concurrent.futures import process
 import numpy as np
 import random
 import sys
@@ -11,6 +12,9 @@ from sklearn.metrics import accuracy_score
 from sklearn.model_selection import KFold, GroupKFold, StratifiedKFold
 from sklearn.cluster import KMeans
 from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
+from multiprocessing import Pool, cpu_count
+
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, Type
@@ -83,6 +87,125 @@ class ConsistencyResults:
     fold_accs: Optional[ndarray] = None
     fold_predictions: Optional[ndarray] = None
     fold_models: Optional[ndarray] = None
+
+
+def array_indexer(array: ndarray, sample_dim: int, idx: ndarray) -> ndarray:
+    # grotesque but hey, we need to index into a position programmatically
+    colons = [":" for _ in range(array.ndim)]
+    colons[sample_dim] = "idx"
+    idx_string = f"{','.join(colons)}"
+    return eval(f"array[{idx_string}]")
+
+
+def validate_fold(
+    x: ndarray,
+    y: ndarray,
+    x_sample_dim: int,
+    y_sample_dim: int,
+    train_idx: ndarray,
+    val_idx: ndarray,
+    model: Model,
+    save_fold_accs: bool,
+) -> KFoldResults:
+    """Perform the internal k-fold validation step on one fold, only doing what is necessary.
+
+    Parameters
+    ----------
+    train_idx: ndarray
+        Fold / validation training indices (see notes above).
+
+    val_idx: ndarray
+        Fold / valdiation testing indices (i.e. NOT the final holdout testin indices / set).
+
+    compute_score: bool
+        Whether or not to compute an accuracy.
+
+    Returns
+    -------
+    kfold_results: KFoldResults
+        Scroll up in the source code.
+    """
+    # regardless of options, we need to fit the training set
+    if y.ndim == 2:
+        raise NotImplementedError("Need to collapse one-hots still")
+
+    x_train = array_indexer(x, x_sample_dim, train_idx)
+    y_train = array_indexer(y, y_sample_dim, train_idx)
+    model.fit(x_train, y_train)
+
+    acc = None
+    y_pred = None
+    if save_fold_accs:
+        x_val = array_indexer(x, x_sample_dim, val_idx)
+        y_val = array_indexer(y, y_sample_dim, val_idx)
+        y_pred = model.predict(x_val)
+        acc = 1 - np.mean(get_y_error(y_pred, y_val, y_sample_dim))
+
+    return KFoldResults(model, acc, y_pred)
+
+
+def validate_kfold(
+    x: ndarray,
+    y: ndarray,
+    x_sample_dim: int,
+    y_sample_dim: int,
+    kfold: Any,
+    models: List[Model],
+    idx: ndarray,
+    save_fold_accs: bool,
+) -> List[KFoldResults]:
+    """Perform the internal k-fold validation step on one fold, only doing what is necessary.
+
+    Parameters
+    ----------
+    train_idx: ndarray
+        Fold / validation training indices (see notes above).
+
+    val_idx: ndarray
+        Fold / valdiation testing indices (i.e. NOT the final holdout testin indices / set).
+
+    compute_score: bool
+        Whether or not to compute an accuracy.
+
+    Returns
+    -------
+    kfold_results: KFoldResults
+        Scroll up in the source code.
+    """
+    results = []
+    for model, (train_idx, val_idx) in zip(models, kfold.split(idx)):
+        # regardless of options, we need to fit the training set
+        if y.ndim == 2:
+            raise NotImplementedError("Need to collapse one-hots still")
+
+        x_train = array_indexer(x, x_sample_dim, train_idx)
+        y_train = array_indexer(y, y_sample_dim, train_idx)
+        model.fit(x_train, y_train)
+
+        acc = None
+        y_pred = None
+        if save_fold_accs:
+            x_val = array_indexer(x, x_sample_dim, val_idx)
+            y_val = array_indexer(y, y_sample_dim, val_idx)
+            y_pred = model.predict(x_val)
+            acc = 1 - np.mean(get_y_error(y_pred, y_val, y_sample_dim))
+
+        results.append(KFoldResults(model, acc, y_pred))
+    return results
+
+
+def validate_kfold_imap(args: Any) -> List[KFoldResults]:
+    return validate_kfold(*args)
+
+
+def get_test_predictions(args: Any) -> List[ndarray]:
+    results_list, x_test = args
+    y_preds = []
+    for results in results_list:
+        fitted = results.fitted_model
+        y_pred = fitted.predict(x_test)
+        y_preds.append(y_pred)
+    return y_preds
 
 
 class ErrorConsistency(ABC):
@@ -551,7 +674,8 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         save_fold_preds: bool = False,
         save_fold_models: bool = False,
         show_progress: bool = True,
-        parallelize_reps: bool = False,
+        parallel_reps: bool = False,
+        loo_parallel: bool = False,
         turbo: bool = False,
         seed: int = None,
     ) -> ConsistencyResults:
@@ -632,38 +756,102 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         fold_predictions: ndarray = []
         fold_models: ndarray = []
         idx = np.arange(0, int(self.x.shape[self.x_sample_dim]), dtype=int)
-        rep_desc, fold_desc = "K-fold Repetition {}", "Fold {}"
-        rep_pbar = tqdm(total=repetitions, desc=rep_desc.format(0), leave=True)
-        for rep, kfold in enumerate(kfolds):  # we have `repetitions` ("rep") kfold partitions
-            rep_pbar.set_description(rep_desc.format(rep))
-            fold_pbar = tqdm(total=self.n_splits, desc=fold_desc.format(0), leave=False)
-            for k, (train_idx, test_idx) in enumerate(kfold.split(idx)):
-                fold_pbar.set_description(fold_desc.format(k))
-                results = self.validate_fold(train_idx, test_idx, save_fold_accs)
-                if save_fold_accs:
-                    fold_accs.append(results.score)
-                if save_fold_preds:
-                    fold_predictions.append(results.prediction)
-                if save_fold_models:
-                    fold_models.append(results.fitted_model)
-                fitted = results.fitted_model
-                y_pred = fitted.predict(x_test)
-                y_err = get_y_error(y_pred, y_test, self.y_sample_dim)
-                acc = 1 - np.mean(y_err)
-                test_predictions.append(y_pred)
-                test_accs.append(acc)
-                test_errors.append(y_err)
-                fold_pbar.update()
-            fold_pbar.close()
-            rep_pbar.update()
-        rep_pbar.close()
+        if not parallel_reps:
+            rep_desc, fold_desc = "K-fold Repetition {}", "Fold {}"
+            rep_pbar = tqdm(total=repetitions, desc=rep_desc.format(0), leave=True)
+            for rep, kfold in enumerate(kfolds):  # we have `repetitions` ("rep") kfold partitions
+                rep_pbar.set_description(rep_desc.format(rep))
+                fold_pbar = tqdm(total=self.n_splits, desc=fold_desc.format(0), leave=False)
+                for k, (train_idx, test_idx) in enumerate(kfold.split(idx)):
+                    fold_pbar.set_description(fold_desc.format(k))
+                    results = self.validate_fold(train_idx, test_idx, save_fold_accs)
+                    if save_fold_accs:
+                        fold_accs.append(results.score)
+                    if save_fold_preds:
+                        fold_predictions.append(results.prediction)
+                    if save_fold_models:
+                        fold_models.append(results.fitted_model)
+                    fitted = results.fitted_model
+                    y_pred = fitted.predict(x_test)
+                    y_err = get_y_error(y_pred, y_test, self.y_sample_dim)
+                    acc = 1 - np.mean(y_err)
+                    test_predictions.append(y_pred)
+                    test_accs.append(acc)
+                    test_errors.append(y_err)
+                    fold_pbar.update()
+                fold_pbar.close()
+                rep_pbar.update()
+            rep_pbar.close()
+        else:
+            # Yes, this is all very grotesque
+            # fmt: off
+            models_list = [
+                [self.model_factory.create() for _ in range(self.n_splits)] for _ in range(repetitions)
+            ]
+            args = [
+                (
+                    self.x, self.y, self.x_sample_dim, self.y_sample_dim,
+                    kfold, models, idx, save_fold_accs,
+                )
+                for kfold, models in zip(kfolds, models_list)
+            ]
+            # fmt: on
+            # with Pool(processes=cpu_count()) as pool:
+            #     rep_results = pool.starmap(validate_kfold, args)
 
+            rep_results = process_map(
+                validate_kfold_imap,
+                args,
+                max_workers=cpu_count(),
+                desc="Repeating k-fold",
+                total=repetitions,
+            )
+
+            predict_args = [(rep_result, x_test) for rep_result in rep_results]
+
+            y_preds_list = process_map(
+                get_test_predictions,
+                predict_args,
+                max_workers=cpu_count(),
+                desc="Computing holdout predictions",
+                total=repetitions,
+            )
+
+            # for results_list in tqdm(rep_results, desc="Computing test predictions", total=repetitions):
+            #     for results in results_list:
+            #         fitted = results.fitted_model
+            #         y_pred = fitted.predict(x_test)
+
+            for results_list, y_preds in tqdm(
+                zip(rep_results, y_preds_list), desc="Saving results", total=repetitions
+            ):
+                for results, y_pred in zip(results_list, y_preds):
+                    if save_fold_accs:
+                        fold_accs.append(results.score)
+                    if save_fold_preds:
+                        fold_predictions.append(results.prediction)
+                    if save_fold_models:
+                        fold_models.append(results.fitted_model)
+                    fitted = results.fitted_model
+                    y_err = get_y_error(y_pred, y_test, self.y_sample_dim)
+                    acc = 1 - np.mean(y_err)
+                    test_predictions.append(y_pred)
+                    test_accs.append(acc)
+                    test_errors.append(y_err)
+
+        print("Computing consistencies")
         errcon_results = error_consistencies(
-            test_predictions, y_test, self.y_sample_dim, empty_unions=self.empty_unions, turbo=turbo
+            test_predictions,
+            y_test,
+            self.y_sample_dim,
+            empty_unions=self.empty_unions,
+            loo_parallel=loo_parallel,
+            turbo=turbo,
         )
 
         consistencies, matrix, unpredictables, predictables, loo_consistencies = errcon_results
-        total = np.sum(unpredictables) / (np.sum(predictables) + 1)
+        numerator = np.sum(unpredictables)
+        total = numerator / np.sum(predictables) if numerator > 0 else 0
 
         return ConsistencyResults(
             consistencies=consistencies,
