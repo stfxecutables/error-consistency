@@ -20,13 +20,9 @@ UnionHandling = Literal["nan", "drop", "error", "warn", "zero", "+1"]
 
 
 @jit(nopython=True, parallel=True, cache=True)
-def error_consistencies_numba(
-    y_errs: ndarray, empty_unions: UnionHandling = "nan"
-) -> Tuple[List, ndarray]:
+def error_consistencies_numba(y_errs: ndarray, empty_unions: UnionHandling = "nan") -> ndarray:
     L = len(y_errs)
-    consistencies = np.empty((L * (L - 1) // 2), dtype=np.float64)
-    matrix = np.zeros((L, L))
-    k = 0  # consistency index
+    matrix = np.nan * np.ones((L, L))
     for i in prange(L):
         err_i = y_errs[i]
         for j in range(L):
@@ -41,12 +37,9 @@ def error_consistencies_numba(
                 if empty_unions == "drop":
                     continue
                 elif empty_unions == "nan":
-                    consistencies[k] = np.nan
-                    k += 1
+                    matrix[i, j] = matrix[j, i] = np.nan
                     continue
                 elif empty_unions == "zero":
-                    consistencies[k] = 0.0
-                    k += 1
                     matrix[i, j] = matrix[j, i] = 0.0
                     continue
                 elif empty_unions == "+1":
@@ -54,10 +47,8 @@ def error_consistencies_numba(
                 else:
                     local_union = -0.00000001
             score = np.sum(err_i & err_j) / local_union
-            consistencies[k] = score
-            k += 1
             matrix[i, j] = matrix[j, i] = score
-    return consistencies, matrix
+    return matrix
 
 
 def error_consistencies_slow(
@@ -222,7 +213,11 @@ def error_consistencies(
 
     if turbo:
         print("Computing pairwise error consistencies ... ", end="", flush=True)
-        consistencies, matrix = error_consistencies_numba(np.array(y_errs), empty_unions)
+        # we don't do the list in the numba call because this won't parallelize as well
+        # i.e. you need the index into the consistencies array because you can't append
+        matrix = error_consistencies_numba(np.array(y_errs), empty_unions)
+        cs = matrix[np.triu_indices_from(matrix, 1)].ravel()
+        consistencies = cs[~np.isnan(cs)] if empty_unions == "drop" else cs
         print("done.")
     else:
         consistencies, matrix = error_consistencies_slow(y_errs, empty_unions)
