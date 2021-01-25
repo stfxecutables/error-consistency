@@ -551,6 +551,8 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         save_fold_preds: bool = False,
         save_fold_models: bool = False,
         show_progress: bool = True,
+        parallelize_reps: bool = False,
+        turbo: bool = False,
         seed: int = None,
     ) -> ConsistencyResults:
         """Evaluate the error consistency of the classifier.
@@ -657,7 +659,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         rep_pbar.close()
 
         errcon_results = error_consistencies(
-            test_predictions, y_test, self.y_sample_dim, empty_unions=self.empty_unions
+            test_predictions, y_test, self.y_sample_dim, empty_unions=self.empty_unions, turbo=turbo
         )
 
         consistencies, matrix, unpredictables, predictables, loo_consistencies = errcon_results
