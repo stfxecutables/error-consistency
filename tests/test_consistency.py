@@ -48,16 +48,15 @@ class TestConsistency:
             errcon = ErrorConsistencyKFoldHoldout(
                 model=KNN, x=X_train, y=y_train, n_splits=5, model_args=knn_args
             )
-            for _ in range(10):
-                errcon.evaluate(
-                    x_test=X_test,
-                    y_test=y_test,
-                    repetitions=100,
-                    save_fold_accs=True,
-                    save_test_accs=True,
-                    save_test_errors=True,
-                    turbo=True,
-                )
+            errcon.evaluate(
+                x_test=X_test,
+                y_test=y_test,
+                repetitions=100,
+                save_fold_accs=True,
+                save_test_accs=True,
+                save_test_errors=True,
+                turbo=True,
+            )
 
     def test_slow(self, capsys: Any) -> None:
         with capsys.disabled():
@@ -67,16 +66,16 @@ class TestConsistency:
             errcon = ErrorConsistencyKFoldHoldout(
                 model=KNN, x=X_train, y=y_train, n_splits=5, model_args=knn_args
             )
-            for _ in range(10):
-                results = errcon.evaluate(
-                    x_test=X_test,
-                    y_test=y_test,
-                    repetitions=100,
-                    save_fold_accs=True,
-                    save_test_accs=True,
-                    save_test_errors=True,
-                    turbo=False,
-                )
+            # for _ in range(10):
+            errcon.evaluate(
+                x_test=X_test,
+                y_test=y_test,
+                repetitions=100,
+                save_fold_accs=True,
+                save_test_accs=True,
+                save_test_errors=True,
+                turbo=False,
+            )
 
     def test_parallel_reps(self, capsys: Any) -> None:
         with capsys.disabled():

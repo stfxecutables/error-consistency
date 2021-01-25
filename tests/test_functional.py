@@ -24,7 +24,9 @@ def test_get_y_error() -> None:
 def test_get_consistencies() -> None:
     for p in range(2, 100):
         y_preds, y_true = random_preds(1000, 100, n_preds=p, dims=1)
-        cs, matrix, unpredictable, predictable = error_consistencies(y_preds, y_true, sample_dim=0)
+        cs, matrix, unpredictable, predictable, loocs = error_consistencies(
+            y_preds, y_true, sample_dim=0, turbo=True
+        )
         assert len(cs) == p * (p - 1) / 2
         assert matrix.shape == (p, p)
         assert np.all(matrix.diagonal().ravel() == 1)
@@ -36,7 +38,7 @@ def test_trivial_consistencies() -> None:
     # Perfect consistency
     y_preds = [np.zeros(10) for _ in range(10)]
     y_true = np.ones(10)
-    cs, matrix, unpredictable, predictable = error_consistencies(y_preds, y_true)
+    cs, matrix, unpredictable, predictable, loocs = error_consistencies(y_preds, y_true, turbo=True)
     assert np.all(cs == 1)
     assert np.all(matrix.ravel() == 1)
 
@@ -44,15 +46,17 @@ def test_trivial_consistencies() -> None:
     y_preds = [np.ones(10) for _ in range(10)]
     y_true = np.ones(10)
     # testing with empty_unions="nan"
-    cs, matrix, unpredictable, predictable = error_consistencies(y_preds, y_true)
+    cs, matrix, unpredictable, predictable, loocs = error_consistencies(
+        y_preds, y_true, empty_unions="nan", turbo=True
+    )
     assert np.all(np.isnan(cs))
     assert np.all(matrix.diagonal().ravel() == 1)
     matrix[matrix == 1] = np.nan
     assert np.all(np.isnan(matrix))
 
     # testing with empty_unions="drop"
-    cs, matrix, unpredictable, predictable = error_consistencies(
-        y_preds, y_true, empty_unions="drop"
+    cs, matrix, unpredictable, predictable, loocs = error_consistencies(
+        y_preds, y_true, empty_unions="drop", turbo=True
     )
     assert len(cs) == 0
     assert np.all(matrix.diagonal().ravel() == 1)
@@ -95,7 +99,9 @@ def test_nontrivial_consistencies() -> None:
             # just make one prediction wrong each time, but in a different location
             # this is zero error consistency (all intersections are empty)
             y_pred[i] = 0
-        cs, matrix, unpredictable, predictable = error_consistencies(y_preds, y_true)
+        cs, matrix, unpredictable, predictable, loocs = error_consistencies(
+            y_preds, y_true, turbo=True
+        )
         assert np.all(cs == 0)
         assert np.all(matrix.diagonal().ravel() == 1)
         matrix[matrix == 1] = 0
@@ -114,7 +120,9 @@ def test_nontrivial_consistencies() -> None:
             y_preds[i][0] = 0
             y_preds[i][i] = 0
         y_preds = y_preds[1:-1]  # first and last predictions have only one error
-        cs, matrix, unpredictable, predictable = error_consistencies(y_preds, y_true)
+        cs, matrix, unpredictable, predictable, loocs = error_consistencies(
+            y_preds, y_true, turbo=True
+        )
         assert np.allclose(cs, np.full(cs.shape, 1 / 3))
         assert np.all(matrix.diagonal().ravel() == 1)
         matrix[matrix == 1] = 1.0 / 3
