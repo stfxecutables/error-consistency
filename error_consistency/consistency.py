@@ -785,16 +785,16 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         else:
             # Yes, this is all very grotesque
             # fmt: off
-            models_list = [
+            models_list = (
                 [self.model_factory.create() for _ in range(self.n_splits)] for _ in range(repetitions)
-            ]
-            args = [
+            )
+            args = (
                 (
                     self.x, self.y, self.x_sample_dim, self.y_sample_dim,
                     kfold, models, idx, save_fold_accs,
                 )
                 for kfold, models in zip(kfolds, models_list)
-            ]
+            )
             # fmt: on
             # with Pool(processes=cpu_count()) as pool:
             #     rep_results = pool.starmap(validate_kfold, args)
