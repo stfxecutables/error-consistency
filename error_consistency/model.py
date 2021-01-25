@@ -267,11 +267,11 @@ class ModelFactory:
                 "Argument `model` must be class for which instances implement "
                 "either a `fit` or `train` method."
             )
-        for methodname in ["fit", "train", "predict", "test"]:
-            if not callable(getattr(model, methodname, None)):
-                raise ValueError(
-                    f"`model` has a `.{methodname}` property but `.{methodname}` is not callable."
-                )
+        # for methodname in ["fit", "train", "predict", "test"]:
+        #     if not callable(getattr(model, methodname, None)):
+        #         raise ValueError(
+        #             f"`model` has a `.{methodname}` property but `.{methodname}` is not callable."
+        #         )
         return model
 
     @staticmethod

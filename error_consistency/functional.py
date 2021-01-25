@@ -1,27 +1,40 @@
 from functools import reduce
+from itertools import combinations
 from typing import List, Tuple, Union
 from warnings import warn
 
 import numpy as np
 from numpy import ndarray
+from numpy.lib.function_base import append
 from pandas import DataFrame, Series
 from typing_extensions import Literal
+from tqdm import tqdm
 
 from error_consistency.utils import to_numpy
 
 ArrayLike = Union[ndarray, DataFrame, Series]
+UnionHandling = Literal["nan", "drop", "error", "warn", "zero", "+1"]
+
+
+def error_consistencies_numba(
+    y_preds: List[ndarray],
+    y_true: ndarray,
+    sample_dim: int = 0,
+    empty_unions: UnionHandling = "nan",
+) -> None:
+    pass
 
 
 def error_consistencies(
     y_preds: List[ndarray],
     y_true: ndarray,
     sample_dim: int = 0,
-    empty_unions: Literal["nan", "drop", "error", "warn"] = "nan",
-) -> Tuple[ndarray, ndarray, ndarray, ndarray]:
+    empty_unions: UnionHandling = "zero",
+) -> Tuple[ndarray, ndarray, ndarray, ndarray, ndarray]:
     """Get the error consistency for a list of predictions."""
     # y_preds must be (reps, n_samples), y_true must be (n_samples,) or (n_samples, 1) or
     # (n_samples, n_features)
-    if empty_unions not in ["drop", "nan", "error", "warn"]:
+    if empty_unions not in ["drop", "nan", "error", "warn", "zero", "+1"]:
         raise ValueError("Invalid option for handling empty unions.")
     if not isinstance(y_preds, list) or len(y_preds) < 2:  # type: ignore
         raise ValueError("`y_preds` must be a list of predictions with length > 1.")
@@ -44,28 +57,54 @@ def error_consistencies(
                 "error consistencies for those pairings"
             )
 
-    unpredictable_set = list(reduce(lambda a, b: a & b, y_errs))  # type: ignore
-    predictable_set = list(reduce(lambda a, b: a | b, y_errs))  # type: ignore
+    unpredictable_set = intersection(y_errs)
+    predictable_set = union(y_errs)
 
-    consistencies, matrix = [], -np.ones([len(y_preds), len(y_preds)], dtype=float)
+    loo_sets = combinations(y_errs, len(y_errs) - 1)  # leave-one out
+    loo_consistencies = np.array(
+        [
+            np.sum(intersection(list(loo_set))) / (np.sum(union(list(loo_set))) + 1)
+            for loo_set in loo_sets
+        ]
+    )
+
+    SMOOTH = 1e-2
+
+    consistencies = []
     matrix = np.eye(len(y_preds), dtype=float)
     matrix[matrix == 0] = np.nan
+    desc = "Calculating consistencies. Estimated mean={:0.3f}"
+    pbar = tqdm(total=len(y_errs), desc=desc.format(0))
     for i, err_i in enumerate(y_errs):
         for j, err_j in enumerate(y_errs):
             if i >= j:
                 continue
-            union = np.sum(err_i | err_j)
-            if union == 0:
+            # local_union = np.sum(err_i | err_j) + SMOOTH
+            # local_union = np.sum(predictable_set) + SMOOTH
+            local_union = np.sum(predictable_set) + 1
+            if local_union == 0:
                 if empty_unions == "drop":
                     continue
                 elif empty_unions == "nan":
                     consistencies.append(np.nan)
                     continue
-            score = np.sum(err_i & err_j) / union
+                elif empty_unions == "zero":
+                    consistencies.append(0)
+                    matrix[i, j] = matrix[j, i] = 0
+                    continue
+                elif empty_unions == "+1":
+                    local_union += 1
+                else:
+                    raise ValueError("Unreachable!")
+            score = np.sum(err_i & err_j) / local_union
             consistencies.append(score)
             matrix[i, j] = matrix[j, i] = score
+        if i % 100 == 0:
+            pbar.set_description(desc.format(np.mean(consistencies)))
+        pbar.update()
+    pbar.close()
 
-    return np.array(consistencies), matrix, unpredictable_set, predictable_set
+    return (np.array(consistencies), matrix, unpredictable_set, predictable_set, loo_consistencies)
 
 
 def get_y_error(y_pred: ndarray, y_true: ndarray, sample_dim: int = 0) -> ndarray:
@@ -83,3 +122,11 @@ def get_y_error(y_pred: ndarray, y_true: ndarray, sample_dim: int = 0) -> ndarra
     raise ValueError(
         "Error consistency only supported for label encoding, dummy coding, or one-hot encoding"
     )
+
+
+def union(y_errs: List[ndarray]) -> ndarray:
+    return reduce(lambda a, b: a | b, y_errs)
+
+
+def intersection(y_errs: List[ndarray]) -> ndarray:
+    return reduce(lambda a, b: a & b, y_errs)

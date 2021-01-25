@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union, Type
 from typing import cast, no_type_check
 from typing_extensions import Literal
 
-from error_consistency.functional import get_y_error, error_consistencies
+from error_consistency.functional import UnionHandling, get_y_error, error_consistencies
 from error_consistency.model import Model, ModelFactory
 from error_consistency.utils import to_numpy
 
@@ -73,6 +73,8 @@ class ConsistencyResults:
 
     consistencies: ndarray
     matrix: ndarray
+    total_consistency: float
+    leave_one_out_consistency: float
 
     test_errors: Optional[List[ndarray]] = None
     test_accs: Optional[ndarray] = None
@@ -235,7 +237,7 @@ class ErrorConsistency(ABC):
         stratify: bool = False,
         x_sample_dim: int = 0,
         y_sample_dim: int = 0,
-        onehot_y: bool = True,
+        empty_unions: str = "drop",
     ) -> None:
         self.model: Model
         self.stratify: bool
@@ -262,17 +264,15 @@ class ErrorConsistency(ABC):
         if n_splits < 2:
             raise ValueError("Must have more than one split for K-fold.")
         self.n_splits = n_splits
-        if not onehot_y:
-            raise NotImplementedError("Dummy-coded `y` currently not implemented.")
-        self.onehot_y = onehot_y
+        self.empty_unions = empty_unions
 
-        self.x, self.y, self.x_df, self.y_df = self.__save_x_y(x, y)
-        dim_info = self.__save_dims(x, y, x_sample_dim, y_sample_dim)
+        self.x, self.y, self.x_df, self.y_df = self.save_x_y(x, y)
+        dim_info = self.save_dims(x, y, x_sample_dim, y_sample_dim)
         self.x_transpose_shape, self.y_transpose_shape = dim_info[:2]
         self.x_sample_dim, self.y_sample_dim = dim_info[2:]
 
     @staticmethod
-    def __save_x_y(x: ndarray, y: ndarray) -> Tuple[ndarray, ndarray, PandasData, PandasData]:
+    def save_x_y(x: ndarray, y: ndarray) -> Tuple[ndarray, ndarray, PandasData, PandasData]:
         x_df = x if isinstance(x, DataFrame) or isinstance(x, Series) else None
         y_df = y if isinstance(y, DataFrame) or isinstance(y, Series) else None
         x = to_numpy(x)
@@ -286,7 +286,7 @@ class ErrorConsistency(ABC):
         return x, y, x_df, y_df
 
     @staticmethod
-    def __save_dims(
+    def save_dims(
         x: ndarray, y: ndarray, x_sample_dim: int, y_sample_dim: int
     ) -> Tuple[Shape, Shape, int, int]:
         # we need to convert the sample dimensions to positive values to construct transpose shapes
@@ -311,17 +311,25 @@ class ErrorConsistency(ABC):
 
     @staticmethod
     def seeds(seed: Optional[int], repetitions: int) -> ndarray:
+        MAX_SEED = 2 ** 32 - 1
         if seed is not None:
             random.seed(seed)
             rng = np.random.default_rng(seed)
-            return rng.integers(0, sys.maxsize, repetitions)
+            return rng.integers(0, MAX_SEED, repetitions)
         rng = np.random.default_rng()
-        return rng.integers(0, sys.maxsize, repetitions)
+        return rng.integers(0, MAX_SEED, repetitions)
 
-    def array_indexer(self, array: ndarray, idx: ndarray) -> ndarray:
+    def array_x_indexer(self, array: ndarray, idx: ndarray) -> ndarray:
         # grotesque but hey, we need to index into a position programmatically
         colons = [":" for _ in range(self.x.ndim)]
         colons[self.x_sample_dim] = "idx"
+        idx_string = f"{','.join(colons)}"
+        return eval(f"array[{idx_string}]")
+
+    def array_y_indexer(self, array: ndarray, idx: ndarray) -> ndarray:
+        # grotesque but hey, we need to index into a position programmatically
+        colons = [":" for _ in range(self.y.ndim)]
+        colons[self.y_sample_dim] = "idx"
         idx_string = f"{','.join(colons)}"
         return eval(f"array[{idx_string}]")
 
@@ -350,16 +358,16 @@ class ErrorConsistency(ABC):
         if self.y.ndim == 2:
             raise NotImplementedError("Need to collapse one-hots still")
 
-        x_train = self.array_indexer(self.x, train_idx)
-        y_train = self.array_indexer(self.y, train_idx)
+        x_train = self.array_x_indexer(self.x, train_idx)
+        y_train = self.array_y_indexer(self.y, train_idx)
         model = self.model_factory.create()
         model.fit(x_train, y_train)
 
         acc = None
         y_pred = None
         if save_fold_accs:
-            x_val = self.array_indexer(self.x, val_idx)
-            y_val = self.array_indexer(self.y, val_idx)
+            x_val = self.array_x_indexer(self.x, val_idx)
+            y_val = self.array_y_indexer(self.y, val_idx)
             y_pred = model.predict(x_val)
             acc = 1 - np.mean(get_y_error(y_pred, y_val, self.y_sample_dim))
 
@@ -505,15 +513,15 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         x: ndarray,
         y: ndarray,
         n_splits: int,
-        model_args: Optional[Dict[str, Any]],
-        fit_args: Optional[Dict[str, Any]],
-        fit_args_x_y: Optional[Tuple[str, str]],
-        predict_args: Optional[Dict[str, Any]],
-        predict_args_x: Optional[str],
-        stratify: bool,
-        x_sample_dim: int,
-        y_sample_dim: int,
-        onehot_y: bool,
+        model_args: Optional[Dict[str, Any]] = None,
+        fit_args: Optional[Dict[str, Any]] = None,
+        fit_args_x_y: Optional[Tuple[str, str]] = None,
+        predict_args: Optional[Dict[str, Any]] = None,
+        predict_args_x: Optional[str] = None,
+        stratify: bool = False,
+        x_sample_dim: int = 0,
+        y_sample_dim: int = 0,
+        empty_unions: UnionHandling = "zero",
     ) -> None:
         super().__init__(
             model,
@@ -528,7 +536,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
             stratify=stratify,
             x_sample_dim=x_sample_dim,
             y_sample_dim=y_sample_dim,
-            onehot_y=onehot_y,
+            empty_unions=empty_unions,
         )
 
     def evaluate(
@@ -609,7 +617,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
                 models: Optional[List[Any]] = None
         """
 
-        self.x_test, self.y_test = self.__save_x_y(x_test, y_test)[0:2]
+        self.x_test, self.y_test = self.save_x_y(x_test, y_test)[0:2]
         seeds = self.seeds(seed, repetitions)
 
         kfolds = [KFold(n_splits=self.n_splits, shuffle=True, random_state=seed) for seed in seeds]
@@ -626,7 +634,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         rep_pbar = tqdm(total=repetitions, desc=rep_desc.format(0), leave=True)
         for rep, kfold in enumerate(kfolds):  # we have `repetitions` ("rep") kfold partitions
             rep_pbar.set_description(rep_desc.format(rep))
-            fold_pbar = tqdm(total=self.n_splits, desc=fold_desc.format(0), leave=True)
+            fold_pbar = tqdm(total=self.n_splits, desc=fold_desc.format(0), leave=False)
             for k, (train_idx, test_idx) in enumerate(kfold.split(idx)):
                 fold_pbar.set_description(fold_desc.format(k))
                 results = self.validate_fold(train_idx, test_idx, save_fold_accs)
@@ -648,11 +656,18 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
             rep_pbar.update()
         rep_pbar.close()
 
-        consistencies, matrix = error_consistencies(test_predictions, y_test, self.y_sample_dim)
+        errcon_results = error_consistencies(
+            test_predictions, y_test, self.y_sample_dim, empty_unions=self.empty_unions
+        )
+
+        consistencies, matrix, unpredictables, predictables, loo_consistencies = errcon_results
+        total = np.sum(unpredictables) / (np.sum(predictables) + 1)
 
         return ConsistencyResults(
             consistencies=consistencies,
             matrix=matrix,
+            total_consistency=total,
+            leave_one_out_consistency=np.mean(loo_consistencies),
             test_errors=test_errors if save_test_errors else None,
             test_accs=test_accs if save_fold_accs else None,
             test_predictions=test_predictions if save_test_predictions else None,
@@ -677,7 +692,6 @@ class ErrorConsistencyInternalKFold(ErrorConsistency):
         stratify: bool,
         x_sample_dim: int,
         y_sample_dim: int,
-        onehot_y: bool,
     ) -> None:
         super().__init__(
             model,
@@ -692,7 +706,6 @@ class ErrorConsistencyInternalKFold(ErrorConsistency):
             stratify=stratify,
             x_sample_dim=x_sample_dim,
             y_sample_dim=y_sample_dim,
-            onehot_y=onehot_y,
         )
 
     def evaluate(
