@@ -64,7 +64,7 @@ class Model:
         of `model` takes x as its first positional argument, as in e.g.
         `model.predict(x, **predict_args)`.
 
-        If a string `x_name, then a dict will be constructed internally by splatting, e.g.
+        If a string `x_name`, then a dict will be constructed internally by splatting, e.g.::
 
             args_dict = {**{x_name: x_train}, **model_args}
             model.predict(**args_dict)
@@ -210,6 +210,8 @@ class ModelFactory:
     y_sample_dim: int = 0
         The axis or dimension along which samples are indexed. Needed for splitting y into
         partitions for k-fold only if the target is e.g. one-hot encoded or dummy-coded.
+
+    :meta private:
     """
 
     def __init__(

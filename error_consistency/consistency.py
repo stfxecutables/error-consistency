@@ -32,6 +32,19 @@ Shape = Tuple[int, ...]
 
 @dataclass(eq=False)
 class KFoldResults:
+    """
+    :meta private:
+    Properties
+    ----------
+    fitted_model: Model
+        The fitted `error_consistency.model.Model`
+        reptitions of k-fold, `N = n_rep * k` unless the `empty_unions` method handling was "drop".
+
+    matrix: ndarray
+        A NumPy array of shape `(N,N)` where `N = n_rep * k` for `n_rep` repetitions of k-fold, and
+        where `matrix[i,j]` holds the consistency for pairings `i` and `j`
+    """
+
     fitted_model: Model
     score: Optional[ndarray]
     prediction: ndarray
@@ -41,14 +54,34 @@ class KFoldResults:
 class ConsistencyResults:
     """Holds results from evaluating error consistency.
 
+    :meta public:
+
     Properties
     ----------
     consistencies: ndarray
-        Given n repetitions of the k-fold process, an array C of shape (n, k, k), an array of square
-        matrices of size k x k, with error consistencies between folds on the upper diagonal, and -1
-        elsewhere. That is, if we denote one of these matrices as A, then for repeition `r`,  `C[r]`
-        = `A[i,j] == 0` if i >= j, and `A[i, j]` is equal to the error consistency between the folds
-        i and j, for i, j in {0, 1, ..., k - 1} .
+        A flat array of all the pairwise consistencies. Length will be N*(N-1)/2, where for `n_rep`
+        reptitions of k-fold, `N = n_rep * k` unless the `empty_unions` method handling was "drop".
+
+    matrix: ndarray
+        A NumPy array of shape `(N,N)` where `N = n_rep * k` for `n_rep` repetitions of k-fold, and
+        where `matrix[i,j]` holds the consistency for pairings `i` and `j`
+
+    total_consistency: float
+        Given the `N` predictions on the test set, where `N = n_rep * k` for `n_rep` repetitions of
+        k-fold, this is the value of the size of the intersection of all error sets divided
+        by the size of the union of all those error sets. That is, this is the size of the set of
+        all samples that were *always* consistently predicted incorrectly divided by the size of the
+        set of all samples that had at least one wrong prediction. When the total_consistency is
+        nonzero, this thus means that there are samples which are *always* incorrectly predicted
+        regarded of the training set. This thus be thought of as something like a *lower bound* on
+        the consistency estimate, where a non-zero value here is indicative / interesting.
+
+    leave_one_out_consistency: float
+        Given the `N` predictions on the test set, where `N = n_rep * k` for `n_rep` repetitions of
+        k-fold, this is the value of the size of the intersection of all error sets *excluding one* divided
+        by the size of the union of all those error sets *excluding the same one*, for each excluded
+        error set. See README.md for `p-1` consistency. This is a slightly less punishing
+        lower-bound that the total_consistency, and is more symmetric with the pairwise consistency.
 
     test_errors: Optional[List[ndarray]] = None
         A list of the boolean error arrays (`y_pred_i != y_test` for fold `i`) for all repetitions.
@@ -90,7 +123,9 @@ class ConsistencyResults:
 
 
 def array_indexer(array: ndarray, sample_dim: int, idx: ndarray) -> ndarray:
-    # grotesque but hey, we need to index into a position programmatically
+    """Used to index into a specific position programmatically.
+    :meta private:
+    """
     colons = [":" for _ in range(array.ndim)]
     colons[sample_dim] = "idx"
     idx_string = f"{','.join(colons)}"
@@ -124,6 +159,8 @@ def validate_fold(
     -------
     kfold_results: KFoldResults
         Scroll up in the source code.
+
+    :meta private:
     """
     # regardless of options, we need to fit the training set
     if y.ndim == 2:
@@ -171,6 +208,8 @@ def validate_kfold(
     -------
     kfold_results: KFoldResults
         Scroll up in the source code.
+
+    :meta private:
     """
     results = []
     for model, (train_idx, val_idx) in zip(models, kfold.split(idx)):
@@ -195,10 +234,12 @@ def validate_kfold(
 
 
 def validate_kfold_imap(args: Any) -> List[KFoldResults]:
+    """:meta private:"""
     return validate_kfold(*args)
 
 
 def get_test_predictions(args: Any) -> List[ndarray]:
+    """:meta private:"""
     results_list, x_test = args
     y_preds = []
     for results in results_list:
@@ -216,16 +257,19 @@ class ErrorConsistency(ABC):
     model: Intersection[Callable, Type]
         A *class* where instances are classifiers that implement:
 
-            1. a `.fit` or `.train` method that:
-               - accepts predictors and targets, plus `fit_args`, and
-               - updates the state of `model` when calling `.fit` or `.train`
-            2. a `.predict` or `.test` method, that:
-               - accepts testing samples, plus `predict_args`, and
-               - requires having called `.fit` previously, and
-               - returns *only* the predictions as a single ArrayLike
-                 (e.g. NumPy array, List, pandas DataFrame or Series)
+        1. A ``.fit`` or ``.train`` method that:
 
-        E.g.
+           #. accepts predictors and targets, plus `fit_args`, and
+           #. updates the state of `model` when calling `.fit` or `.train`
+
+        2. A ``.predict`` or ``.test`` method, that:
+
+           #. accepts testing samples, plus ``predict_args``, and
+           #. requires having called ``.fit`` previously, and
+           #. returns *only* the predictions as a single ArrayLike (e.g. NumPy array, List, pandas DataFrame or Series)
+
+
+        E.g.::
 
             import numpy as np
             from error_consistency import ErrorConsistency
@@ -344,6 +388,8 @@ class ErrorConsistency(ABC):
     error-consistency (e.g. with holdout, Monte-Carlo style subsetting, etc). We just have train and
     (fold) test indices, and do the usual fit calls and etc. So this can be abstracted to the base
     error consistency class.
+
+    :meta private:
     """
 
     def __init__(
@@ -396,6 +442,7 @@ class ErrorConsistency(ABC):
 
     @staticmethod
     def save_x_y(x: ndarray, y: ndarray) -> Tuple[ndarray, ndarray, PandasData, PandasData]:
+        """ :meta private: """
         x_df = x if isinstance(x, DataFrame) or isinstance(x, Series) else None
         y_df = y if isinstance(y, DataFrame) or isinstance(y, Series) else None
         x = to_numpy(x)
@@ -412,6 +459,7 @@ class ErrorConsistency(ABC):
     def save_dims(
         x: ndarray, y: ndarray, x_sample_dim: int, y_sample_dim: int
     ) -> Tuple[Shape, Shape, int, int]:
+        """ :meta private: """
         # we need to convert the sample dimensions to positive values to construct transpose shapes
         if y_sample_dim > 1 or y_sample_dim < -1:
             raise ValueError(
@@ -434,15 +482,19 @@ class ErrorConsistency(ABC):
 
     @staticmethod
     def seeds(seed: Optional[int], repetitions: int) -> ndarray:
+        """ :meta private: """
         MAX_SEED = 2 ** 32 - 1
         if seed is not None:
             random.seed(seed)
             rng = np.random.default_rng(seed)
             return rng.integers(0, MAX_SEED, repetitions)
         rng = np.random.default_rng()
+        seed = rng.integers(0, MAX_SEED, 1)
+        rng = np.random.default_rng(seed)
         return rng.integers(0, MAX_SEED, repetitions)
 
     def array_x_indexer(self, array: ndarray, idx: ndarray) -> ndarray:
+        """ :meta private: """
         # grotesque but hey, we need to index into a position programmatically
         colons = [":" for _ in range(self.x.ndim)]
         colons[self.x_sample_dim] = "idx"
@@ -450,6 +502,7 @@ class ErrorConsistency(ABC):
         return eval(f"array[{idx_string}]")
 
     def array_y_indexer(self, array: ndarray, idx: ndarray) -> ndarray:
+        """ :meta private: """
         # grotesque but hey, we need to index into a position programmatically
         colons = [":" for _ in range(self.y.ndim)]
         colons[self.y_sample_dim] = "idx"
@@ -476,6 +529,8 @@ class ErrorConsistency(ABC):
         -------
         kfold_results: KFoldResults
             Scroll up in the source code.
+
+        :meta private:
         """
         # regardless of options, we need to fit the training set
         if self.y.ndim == 2:
@@ -505,16 +560,18 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
     model: Intersection[Callable, Type]
         A *class* where instances are classifiers that implement:
 
-            1. a `.fit` or `.train` method that:
-               - accepts predictors and targets, plus `fit_args`, and
-               - updates the state of `model` when calling `.fit` or `.train`
-            2. a `.predict` or `.test` method, that:
-               - accepts testing samples, plus `predict_args`, and
-               - requires having called `.fit` previously, and
-               - returns *only* the predictions as a single ArrayLike
-                 (e.g. NumPy array, List, pandas DataFrame or Series)
+        1. A ``.fit`` or ``.train`` method that:
 
-        E.g.
+           * accepts predictors and targets, plus `fit_args`, and
+           * updates the state of `model` when calling `.fit` or `.train`
+
+        2. A ``.predict`` or ``.test`` method, that:
+
+           * accepts testing samples, plus ``predict_args``, and
+           * requires having called ``.fit`` previously, and
+           * returns *only* the predictions as a single ArrayLike (e.g. NumPy array, List, pandas DataFrame or Series)
+
+        E.g.::
 
             import numpy as np
             from error_consistency import ErrorConsistency
@@ -673,6 +730,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         save_fold_accs: bool = False,
         save_fold_preds: bool = False,
         save_fold_models: bool = False,
+        empty_unions: UnionHandling = "zero",
         show_progress: bool = True,
         parallel_reps: bool = False,
         loo_parallel: bool = False,
@@ -733,14 +791,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         Returns
         -------
         results: ConsistencyResults
-            A dataclass with properties:
-
-                consistencies: ndarray
-                consistency_matrices: List[ndarray]
-                scores: Optional[ndarray] = None
-                error_arrays: Optional[List[ndarray]] = None
-                predictions: Optional[List[ndarray]] = None
-                models: Optional[List[Any]] = None
+            A `error_consistency.consistency.ConsistencyResults` object.
         """
 
         self.x_test, self.y_test = self.save_x_y(x_test, y_test)[0:2]
@@ -839,12 +890,11 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
                     test_accs.append(acc)
                     test_errors.append(y_err)
 
-        print("Computing consistencies")
         errcon_results = error_consistencies(
-            test_predictions,
-            y_test,
-            self.y_sample_dim,
-            empty_unions=self.empty_unions,
+            y_preds=test_predictions,
+            y_true=y_test,
+            sample_dim=self.y_sample_dim,
+            empty_unions=empty_unions,
             loo_parallel=loo_parallel,
             turbo=turbo,
         )

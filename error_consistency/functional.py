@@ -16,7 +16,7 @@ from tqdm import tqdm
 from error_consistency.utils import to_numpy
 
 ArrayLike = Union[ndarray, DataFrame, Series]
-UnionHandling = Literal["nan", "drop", "error", "warn", "zero", "+1"]
+UnionHandling = Literal["nan", "drop", "error", "warn", "zero", "+1", "none"]
 
 
 @jit(nopython=True, parallel=True, cache=True)
@@ -184,7 +184,7 @@ def error_consistencies(
     """Get the error consistency for a list of predictions."""
     # y_preds must be (reps, n_samples), y_true must be (n_samples,) or (n_samples, 1) or
     # (n_samples, n_features)
-    if empty_unions not in ["drop", "nan", "error", "warn", "zero", "+1"]:
+    if empty_unions not in ["drop", "nan", "error", "warn", "zero", "+1", "none"]:
         raise ValueError("Invalid option for handling empty unions.")
     if not isinstance(y_preds, list) or len(y_preds) < 2:  # type: ignore
         raise ValueError("`y_preds` must be a list of predictions with length > 1.")
