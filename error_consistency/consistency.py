@@ -1,3 +1,4 @@
+from __future__ import annotations
 from concurrent.futures import process
 import numpy as np
 import random
@@ -32,8 +33,10 @@ Shape = Tuple[int, ...]
 
 @dataclass(eq=False)
 class KFoldResults:
-    """
+    """Hold results of a single fold.
+
     :meta private:
+
     Properties
     ----------
     fitted_model: Model
@@ -53,8 +56,6 @@ class KFoldResults:
 @dataclass(eq=False)
 class ConsistencyResults:
     """Holds results from evaluating error consistency.
-
-    :meta public:
 
     Properties
     ----------
@@ -124,6 +125,7 @@ class ConsistencyResults:
 
 def array_indexer(array: ndarray, sample_dim: int, idx: ndarray) -> ndarray:
     """Used to index into a specific position programmatically.
+
     :meta private:
     """
     colons = [":" for _ in range(array.ndim)]
@@ -627,7 +629,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         `model.fit(x, y, **model_args)`.
 
         If a tuple of strings (x_name, y_name), then a dict will be constructed internally by
-        splatting, e.g.
+        splatting, e.g.::
 
             args_dict = {**{x_name: x_train, y_name: y_train}, **model_args}
             model.fit(**args_dict)
@@ -646,7 +648,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         `model.predict(x, **predict_args)`.
 
         If `predict_args_x` is a string, then a dict will be constructed internally with this
-        string, e.g.
+        string, e.g.::
 
             args_dict = {**{predict_args_x: x_train}, **model_args}
             model.predict(**args_dict)

@@ -19,7 +19,7 @@ class Model:
     ----------
     model: Intersection[Callable, Type]
         A *class* for which instances implement (1) .fit or .train methods and (2) .predict or .test
-        method, and which takes `model_args` in its constructor. E.g.
+        method, and which takes `model_args` in its constructor. E.g.::
 
             from error_consistency import ErrorConsistency
             from sklearn.cluster import KNeighborsClassifier as KNN
@@ -46,7 +46,7 @@ class Model:
         `model.fit(x, y, **model_args)`.
 
         If a tuple of strings (x_name, y_name), then a dict will be constructed internally by
-        splatting, e.g.
+        splatting, e.g.::
 
             args_dict = {**{x_name: x_train, y_name: y_train}, **model_args}
             model.fit(**args_dict)
