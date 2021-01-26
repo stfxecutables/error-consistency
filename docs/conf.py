@@ -81,6 +81,7 @@ html_theme_options = {
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 html_css_files = ["overrides.css"]
+html_js_files = ["style_force.js"]
 
 # https://stackoverflow.com/questions/34052582/how-do-i-refer-to-classes-and-methods-in-other-files-my-project-with-sphinx
 default_role = "py:obj"
