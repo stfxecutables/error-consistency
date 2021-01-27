@@ -1,15 +1,9 @@
-from error_consistency.utils import to_numpy
-import numpy as np
+from typing import Any, Dict, Optional, Tuple
 
 from numpy import ndarray
 from pandas import DataFrame, Series
-from sklearn.model_selection import KFold, GroupKFold, StratifiedKFold
-from sklearn.cluster import KMeans
 
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union, Type
-from typing import cast, no_type_check
-from typing_extensions import Literal
+from error_consistency.utils import to_numpy
 
 
 class Model:
@@ -116,7 +110,8 @@ class Model:
                 self.model.train(**x_y_args, **fit_args)
         else:
             raise ValueError(
-                "Bug in model validation code (no `fit` or `train` method found.) Please report this."
+                "Bug in model validation code (no `fit` or `train` method found). "
+                "Please report this."
             )
 
     def predict(self, x: ndarray) -> ndarray:
@@ -136,7 +131,8 @@ class Model:
                 results = self.model.test(**x_args, **predict_args)
         else:
             raise ValueError(
-                "Bug in model validation code (no `predict` or `test` method found.) Please report this."
+                "Bug in model validation code (no `fit` or `train` method found). "
+                "Please report this."
             )
         try:
             return to_numpy(results)

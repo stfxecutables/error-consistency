@@ -17,9 +17,9 @@ from tqdm import tqdm
 
 from error_consistency.utils import to_numpy
 
-UNION_OPTIONS = ["nan", "drop", "error", "warn", "zero", "+1", "none"]
+UNION_OPTIONS = ["nan", "drop", "error", "warn", "zero", "+1", "length"]
 ArrayLike = Union[ndarray, DataFrame, Series]
-UnionHandling = Literal["nan", "drop", "error", "warn", "zero", "+1", "none"]
+UnionHandling = Literal["nan", "drop", "error", "warn", "zero", "+1", "length"]
 """UnionHandling"""
 
 
@@ -48,8 +48,12 @@ def error_consistencies_numba(y_errs: ndarray, empty_unions: UnionHandling = "na
                     continue
                 elif empty_unions == "+1":
                     local_union += 1.0
+                elif empty_unions == "length":
+                    local_union = len(err_i)
                 else:
                     local_union = -0.00000001
+            if empty_unions == "length":
+                local_union = len(err_i)
             score = np.sum(err_i & err_j) / local_union
             matrix[i, j] = matrix[j, i] = score
     return matrix
@@ -80,8 +84,12 @@ def error_consistencies_slow(
                     continue
                 elif empty_unions == "+1":
                     local_union += 1
+                elif empty_unions == "length":
+                    local_union = len(err_i)
                 else:
                     raise ValueError("Unreachable!")
+            if empty_unions == "length":
+                local_union = len(err_i)
             score = np.sum(err_i & err_j) / local_union
             consistencies.append(score)
             matrix[i, j] = matrix[j, i] = score
@@ -94,6 +102,7 @@ def error_consistencies_slow(
 
 def loo_loop(args: Tuple[ndarray, UnionHandling]) -> Optional[ndarray]:
     lsets, empty_unions = args
+
     numerator = np.sum(intersection(list(lsets)))
     denom = np.sum(union(list(lsets)))
     if denom == 0:
@@ -105,8 +114,12 @@ def loo_loop(args: Tuple[ndarray, UnionHandling]) -> Optional[ndarray]:
             return 0.0
         elif empty_unions == "+1":
             denom += 1.0
+        elif empty_unions == "length":
+            denom = len(lsets[0])
         else:
             raise ValueError("Unreachable!")
+    if empty_unions == "length":
+        denom = len(lsets[0])
     return numerator / denom
 
 
@@ -129,7 +142,9 @@ def loo_consistencies(
         if empty_unions == "drop":
             consistencies = np.array(filter(lambda c: c is None, consistencies))
         if empty_unions == "nan":
-            consistencies = np.array(map(lambda c: np.nan if c is None else c, consistencies))
+            consistencies = np.array(
+                map(lambda c: np.nan if c is None else c, consistencies)  # type: ignore
+            )
     else:
         consistencies = []
         for lset in tqdm(loo_sets, total=L, desc="Computing leave-one-out error consistencies"):
@@ -146,8 +161,12 @@ def loo_consistencies(
                     continue
                 elif empty_unions == "+1":
                     denom += 1.0
+                elif empty_unions == "length":
+                    denom = len(lset[0])
                 else:
                     raise ValueError("Unreachable!")
+            if empty_unions == "length":
+                denom = len(lset[0])
             consistencies.append(numerator / denom)
     return np.array(consistencies)
 

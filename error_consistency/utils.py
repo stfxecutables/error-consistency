@@ -1,14 +1,8 @@
-import numpy as np
+from typing import Any
 
+import numpy as np
 from numpy import ndarray
 from pandas import DataFrame, Series
-from sklearn.model_selection import KFold, GroupKFold, StratifiedKFold
-from sklearn.cluster import KMeans
-
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union, Type
-from typing import cast, no_type_check
-from typing_extensions import Literal
 
 
 def to_numpy(x: Any) -> ndarray:
@@ -23,3 +17,14 @@ def to_numpy(x: Any) -> ndarray:
             raise ValueError("Cannot create NumPy array from `x`.") from e
     else:
         raise ValueError("Unsupported type for predictor `x`")
+
+
+def array_indexer(array: ndarray, sample_dim: int, idx: ndarray) -> ndarray:
+    """Used to index into a specific position programmatically.
+
+    :meta private:
+    """
+    colons = [":" for _ in range(array.ndim)]
+    colons[sample_dim] = "idx"
+    idx_string = f"{','.join(colons)}"
+    return eval(f"array[{idx_string}]")

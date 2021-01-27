@@ -1,137 +1,25 @@
 from __future__ import annotations
-from concurrent.futures import process
-import numpy as np
-import random
-import sys
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from abc import ABC
+from multiprocessing import cpu_count
+from typing import Any, Dict, Generator, List, Optional, Tuple, Union
+
+import numpy as np
 from numpy import ndarray
-from numpy.random import SeedSequence, MT19937, RandomState
 from pandas import DataFrame, Series
-from sklearn.metrics import accuracy_score
-from sklearn.model_selection import KFold, GroupKFold, StratifiedKFold
-from sklearn.cluster import KMeans
+from sklearn.model_selection import KFold, StratifiedKFold
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
-from multiprocessing import Pool, cpu_count
 
-
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union, Type
-from typing import cast, no_type_check
-from typing_extensions import Literal
-
-from error_consistency.functional import UnionHandling, get_y_error, error_consistencies
+from error_consistency.containers import ConsistencyResults, KFoldResults
+from error_consistency.functional import UnionHandling, error_consistencies, get_y_error
 from error_consistency.model import Model, ModelFactory
-from error_consistency.utils import to_numpy
-
+from error_consistency.parallel import get_test_predictions, validate_kfold_imap
+from error_consistency.random import parallel_seed_generators, random_seeds
+from error_consistency.utils import array_indexer, to_numpy
 
 PandasData = Union[DataFrame, Series]
 Shape = Tuple[int, ...]
-
-
-@dataclass(eq=False)
-class KFoldResults:
-    """Hold results of a single fold.
-
-    :meta private:
-
-    Properties
-    ----------
-    fitted_model: Model
-        The fitted `error_consistency.model.Model`
-        reptitions of k-fold, `N = n_rep * k` unless the `empty_unions` method handling was "drop".
-
-    matrix: ndarray
-        A NumPy array of shape `(N,N)` where `N = n_rep * k` for `n_rep` repetitions of k-fold, and
-        where `matrix[i,j]` holds the consistency for pairings `i` and `j`
-    """
-
-    fitted_model: Model
-    score: Optional[ndarray]
-    prediction: ndarray
-
-
-@dataclass(eq=False)
-class ConsistencyResults:
-    """Holds results from evaluating error consistency.
-
-    Properties
-    ----------
-    consistencies: ndarray
-        A flat array of all the pairwise consistencies. Length will be N*(N-1)/2, where for `n_rep`
-        reptitions of k-fold, `N = n_rep * k` unless the `empty_unions` method handling was "drop".
-
-    matrix: ndarray
-        A NumPy array of shape `(N,N)` where `N = n_rep * k` for `n_rep` repetitions of k-fold, and
-        where `matrix[i,j]` holds the consistency for pairings `i` and `j`
-
-    total_consistency: float
-        Given the `N` predictions on the test set, where `N = n_rep * k` for `n_rep` repetitions of
-        k-fold, this is the value of the size of the intersection of all error sets divided
-        by the size of the union of all those error sets. That is, this is the size of the set of
-        all samples that were *always* consistently predicted incorrectly divided by the size of the
-        set of all samples that had at least one wrong prediction. When the total_consistency is
-        nonzero, this thus means that there are samples which are *always* incorrectly predicted
-        regarded of the training set. This thus be thought of as something like a *lower bound* on
-        the consistency estimate, where a non-zero value here is indicative / interesting.
-
-    leave_one_out_consistency: float
-        Given the `N` predictions on the test set, where `N = n_rep * k` for `n_rep` repetitions of
-        k-fold, this is the value of the size of the intersection of all error sets *excluding one* divided
-        by the size of the union of all those error sets *excluding the same one*, for each excluded
-        error set. See README.md for `p-1` consistency. This is a slightly less punishing
-        lower-bound that the total_consistency, and is more symmetric with the pairwise consistency.
-
-    test_errors: Optional[List[ndarray]] = None
-        A list of the boolean error arrays (`y_pred_i != y_test` for fold `i`) for all repetitions.
-        Total of `k * repetitions` values if k > 1.
-
-    test_accs: Optional[ndarray] = None
-        An array of the accuracies `np.mean(y_pred_i == y_test)` for fold `i` for all repetitions.
-        Total of `k * repetitions` values if k > 1.
-
-    test_predictions: Optional[ndarray] = None
-        An array of the predictions `y_pred_i` for fold `i` for all repetitions. Total of
-        `k * repetitions` values if k > 1.
-
-    fold_accs: Optional[ndarray] = None
-        An array of shape `(repetitions, k)` the accuracies (`np.mean(y_pred_fold_i == y_fold_i` for
-        fold `i`) for all repetitions. Total of `k * repetitions` values if k > 1.
-
-    fold_predictions: Optional[ndarray] = None
-        A NumPy array of shape `(repetitions, k, n_samples)` of the predictions on the *fold* test
-        set (`y_pred_fold_i` for fold `i`) for all repetitions.
-
-    fold_models: Optional[ndarray[Model]] = None
-        A NumPy object array of size (repetitions, k) where each entry (r, i) is the fitted model on
-        repetition `r` fold `i`.
-    """
-
-    consistencies: ndarray
-    matrix: ndarray
-    total_consistency: float
-    leave_one_out_consistency: float
-
-    test_errors: Optional[List[ndarray]] = None
-    test_accs: Optional[ndarray] = None
-    test_predictions: Optional[ndarray] = None
-
-    fold_accs: Optional[ndarray] = None
-    fold_predictions: Optional[ndarray] = None
-    fold_models: Optional[ndarray] = None
-
-
-def array_indexer(array: ndarray, sample_dim: int, idx: ndarray) -> ndarray:
-    """Used to index into a specific position programmatically.
-
-    :meta private:
-    """
-    colons = [":" for _ in range(array.ndim)]
-    colons[sample_dim] = "idx"
-    idx_string = f"{','.join(colons)}"
-    return eval(f"array[{idx_string}]")
 
 
 def validate_fold(
@@ -183,75 +71,7 @@ def validate_fold(
     return KFoldResults(model, acc, y_pred)
 
 
-def validate_kfold(
-    x: ndarray,
-    y: ndarray,
-    x_sample_dim: int,
-    y_sample_dim: int,
-    kfold: Any,
-    models: List[Model],
-    idx: ndarray,
-    save_fold_accs: bool,
-) -> List[KFoldResults]:
-    """Perform the internal k-fold validation step on one fold, only doing what is necessary.
-
-    Parameters
-    ----------
-    train_idx: ndarray
-        Fold / validation training indices (see notes above).
-
-    val_idx: ndarray
-        Fold / valdiation testing indices (i.e. NOT the final holdout testin indices / set).
-
-    compute_score: bool
-        Whether or not to compute an accuracy.
-
-    Returns
-    -------
-    kfold_results: KFoldResults
-        Scroll up in the source code.
-
-    :meta private:
-    """
-    results = []
-    for model, (train_idx, val_idx) in zip(models, kfold.split(idx)):
-        # regardless of options, we need to fit the training set
-        if y.ndim == 2:
-            raise NotImplementedError("Need to collapse one-hots still")
-
-        x_train = array_indexer(x, x_sample_dim, train_idx)
-        y_train = array_indexer(y, y_sample_dim, train_idx)
-        model.fit(x_train, y_train)
-
-        acc = None
-        y_pred = None
-        if save_fold_accs:
-            x_val = array_indexer(x, x_sample_dim, val_idx)
-            y_val = array_indexer(y, y_sample_dim, val_idx)
-            y_pred = model.predict(x_val)
-            acc = 1 - np.mean(get_y_error(y_pred, y_val, y_sample_dim))
-
-        results.append(KFoldResults(model, acc, y_pred))
-    return results
-
-
-def validate_kfold_imap(args: Any) -> List[KFoldResults]:
-    """:meta private:"""
-    return validate_kfold(*args)
-
-
-def get_test_predictions(args: Any) -> List[ndarray]:
-    """:meta private:"""
-    results_list, x_test = args
-    y_preds = []
-    for results in results_list:
-        fitted = results.fitted_model
-        y_pred = fitted.predict(x_test)
-        y_preds.append(y_pred)
-    return y_preds
-
-
-class ErrorConsistency(ABC):
+class ErrorConsistencyBase(ABC):
     """Base class for functionality that all error consistency calculatings must perform.
 
     Parameters
@@ -268,8 +88,8 @@ class ErrorConsistency(ABC):
 
            #. accepts testing samples, plus ``predict_args``, and
            #. requires having called ``.fit`` previously, and
-           #. returns *only* the predictions as a single ArrayLike (e.g. NumPy array, List, pandas DataFrame or Series)
-
+           #. returns *only* the predictions as a single ArrayLike (e.g. NumPy array, List, pandas
+              DataFrame or Series)
 
         E.g.::
 
@@ -288,7 +108,6 @@ class ErrorConsistency(ABC):
 
             KNN.fit(x, y)  # updates the state, no need to use a returned value
             y_pred = KNN.predict(x_test)  # returns a single object
-
 
     x: Union[List, pandas.DataFrame, pandas.Series, numpy.ndarray]
         ArrayLike object containing predictor samples. Must be in a format that is consumable with
@@ -482,35 +301,6 @@ class ErrorConsistency(ABC):
         y_transpose_shape = y.shape if y.ndim != 2 else ((0, 1) if y_dim == 1 else (1, 0))
         return x_transpose_shape, y_transpose_shape, x_dim, y_dim
 
-    @staticmethod
-    def seeds(seed: Optional[int], repetitions: int) -> ndarray:
-        """ :meta private: """
-        MAX_SEED = 2 ** 32 - 1
-        if seed is not None:
-            random.seed(seed)
-            rng = np.random.default_rng(seed)
-            return rng.integers(0, MAX_SEED, repetitions)
-        rng = np.random.default_rng()
-        seed = rng.integers(0, MAX_SEED, 1)
-        rng = np.random.default_rng(seed)
-        return rng.integers(0, MAX_SEED, repetitions)
-
-    def array_x_indexer(self, array: ndarray, idx: ndarray) -> ndarray:
-        """ :meta private: """
-        # grotesque but hey, we need to index into a position programmatically
-        colons = [":" for _ in range(self.x.ndim)]
-        colons[self.x_sample_dim] = "idx"
-        idx_string = f"{','.join(colons)}"
-        return eval(f"array[{idx_string}]")
-
-    def array_y_indexer(self, array: ndarray, idx: ndarray) -> ndarray:
-        """ :meta private: """
-        # grotesque but hey, we need to index into a position programmatically
-        colons = [":" for _ in range(self.y.ndim)]
-        colons[self.y_sample_dim] = "idx"
-        idx_string = f"{','.join(colons)}"
-        return eval(f"array[{idx_string}]")
-
     def validate_fold(
         self, train_idx: ndarray, val_idx: ndarray, save_fold_accs: bool
     ) -> KFoldResults:
@@ -538,23 +328,23 @@ class ErrorConsistency(ABC):
         if self.y.ndim == 2:
             raise NotImplementedError("Need to collapse one-hots still")
 
-        x_train = self.array_x_indexer(self.x, train_idx)
-        y_train = self.array_y_indexer(self.y, train_idx)
+        x_train = array_indexer(self.x, self.x_sample_dim, train_idx)
+        y_train = array_indexer(self.y, self.y_sample_dim, train_idx)
         model = self.model_factory.create()
         model.fit(x_train, y_train)
 
         acc = None
         y_pred = None
         if save_fold_accs:
-            x_val = self.array_x_indexer(self.x, val_idx)
-            y_val = self.array_y_indexer(self.y, val_idx)
+            x_val = array_indexer(self.x, self.x_sample_dim, val_idx)
+            y_val = array_indexer(self.y, self.y_sample_dim, val_idx)
             y_pred = model.predict(x_val)
             acc = 1 - np.mean(get_y_error(y_pred, y_val, self.y_sample_dim))
 
         return KFoldResults(model, acc, y_pred)
 
 
-class ErrorConsistencyKFoldHoldout(ErrorConsistency):
+class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
     """Compute error consistencies for a classifier.
 
     Parameters
@@ -571,7 +361,10 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
 
            * accepts testing samples, plus ``predict_args``, and
            * requires having called ``.fit`` previously, and
-           * returns *only* the predictions as a single ArrayLike (e.g. NumPy array, List, pandas DataFrame or Series)
+           * returns *only* the predictions as a single ArrayLike (e.g. NumPy array, List, pandas
+             DataFrame or Series)
+
+        .. _valid model example:
 
         E.g.::
 
@@ -608,21 +401,27 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         in `y_sample_dim`.
 
     n_splits: int = 5
-        How many folds to use for validating error consistency.
+        How many folds to use, and thus models to generate, per repetition.
 
     model_args: Optional[Dict[str, Any]]
         Any arguments that are required each time to construct a fresh instance of the model (see
-        above). Note that the data x and y must NOT be included here.
+        the `valid model example`_ above). Note that the data x and y must NOT be included here.
 
     fit_args: Optional[Dict[str, Any]]
         Any arguments that are required each time when calling the `.fit` or `.train` methods
-        internally (see notes for `model` above). Note that the data x and y must NOT be included
-        here.
+        internally (see the `valid model example`_ above). Note that the data x and y must NOT be
+        included here.
 
     fit_args_x_y: Optional[Tuple[str, str]] = None
         Name of the arguments which data `x` and target `y` are passed to. This is needed because
         different libraries may have different conventions for how they expect predictors and
-        targets to be passed in to `fit` or `train`.
+        targets to be passed in to `fit` or `train`. For example, a function may have the
+        signature::
+
+            f(predictor: ndarray, target: ndarray) -> Any
+
+        To allow our internal `x_train` and `x_test` splits to be passed to the right arguments,
+        we thus need to know these names.
 
         If None (default), it will be assumed that the `.fit` or `.train` method of the instance of
         `model` takes x as its first positional argument, and `y` as its second, as in e.g.
@@ -634,9 +433,14 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
             args_dict = {**{x_name: x_train, y_name: y_train}, **model_args}
             model.fit(**args_dict)
 
+        Alternately, see the documentation for `error_consistency.model.Model` for how to subclass
+        your own function here if you require more fine-grained control of how arguments are passed
+        into the fit and predict calls.
+
     predict_args: Optional[Dict[str, Any]]
         Any arguments that are required each time when calling the `.predict` or `.test` methods
-        internally (see notes for `model` above). Note that the data x must NOT be included here.
+        internally (see the `valid model example`_ above). Note that the data x must NOT be included
+        here.
 
     predict_args_x: Optional[str] = None
         Name of the argument which data `x` is passed to during evaluation. This is needed because
@@ -665,9 +469,8 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         The axis or dimension along which samples are indexed. Needed for splitting y into
         partitions for k-fold only if the target is e.g. one-hot encoded or dummy-coded.
 
-    onehot_y: bool = True
-        Only relevant for two-dimensional `y`. Set to True if `y` is a one-hot array with samples
-        indexed by `y_sample_dim`. Set to False if `y` is dummy-coded.
+    empty_unions: UnionHandling = "zero"
+        How to
 
     Notes
     -----
@@ -797,9 +600,17 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         """
 
         self.x_test, self.y_test = self.save_x_y(x_test, y_test)[0:2]
-        seeds = self.seeds(seed, repetitions)
+        seeds = random_seeds(seed, repetitions)
 
-        kfolds = [KFold(n_splits=self.n_splits, shuffle=True, random_state=seed) for seed in seeds]
+        if self.stratify:
+            kfolds = [
+                StratifiedKFold(n_splits=self.n_splits, shuffle=True, random_state=seed)
+                for seed in seeds
+            ]
+        else:
+            kfolds = [
+                KFold(n_splits=self.n_splits, shuffle=True, random_state=seed) for seed in seeds
+            ]
 
         test_errors: List[ndarray] = []
         test_accs: ndarray = []
@@ -809,13 +620,17 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
         fold_predictions: ndarray = []
         fold_models: ndarray = []
         idx = np.arange(0, int(self.x.shape[self.x_sample_dim]), dtype=int)
+        if self.y.ndim == 2:
+            y_split = np.argmax(self.y, axis=1 - np.abs(self.y_sample_dim))  # convert to labels
+        else:
+            y_split = self.y
         if not parallel_reps:
             rep_desc, fold_desc = "K-fold Repetition {}", "Fold {}"
             rep_pbar = tqdm(total=repetitions, desc=rep_desc.format(0), leave=True)
             for rep, kfold in enumerate(kfolds):  # we have `repetitions` ("rep") kfold partitions
                 rep_pbar.set_description(rep_desc.format(rep))
                 fold_pbar = tqdm(total=self.n_splits, desc=fold_desc.format(0), leave=False)
-                for k, (train_idx, test_idx) in enumerate(kfold.split(idx)):
+                for k, (train_idx, test_idx) in enumerate(kfold.split(idx, y_split)):
                     fold_pbar.set_description(fold_desc.format(k))
                     results = self.validate_fold(train_idx, test_idx, save_fold_accs)
                     if save_fold_accs:
@@ -836,44 +651,22 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
                 rep_pbar.update()
             rep_pbar.close()
         else:
-            # Yes, this is all very grotesque
-            # fmt: off
-            models_list = (
-                [self.model_factory.create() for _ in range(self.n_splits)] for _ in range(repetitions)
-            )
-            args = (
-                (
-                    self.x, self.y, self.x_sample_dim, self.y_sample_dim,
-                    kfold, models, idx, save_fold_accs,
-                )
-                for kfold, models in zip(kfolds, models_list)
-            )
-            # fmt: on
-            # with Pool(processes=cpu_count()) as pool:
-            #     rep_results = pool.starmap(validate_kfold, args)
 
             rep_results = process_map(
                 validate_kfold_imap,
-                args,
+                self.starmap_args(repetitions, save_fold_accs, seed),
                 max_workers=cpu_count(),
                 desc="Repeating k-fold",
                 total=repetitions,
             )
 
-            predict_args = [(rep_result, x_test) for rep_result in rep_results]
-
             y_preds_list = process_map(
                 get_test_predictions,
-                predict_args,
+                [(rep_result, x_test) for rep_result in rep_results],
                 max_workers=cpu_count(),
                 desc="Computing holdout predictions",
                 total=repetitions,
             )
-
-            # for results_list in tqdm(rep_results, desc="Computing test predictions", total=repetitions):
-            #     for results in results_list:
-            #         fitted = results.fitted_model
-            #         y_pred = fitted.predict(x_test)
 
             for results_list, y_preds in tqdm(
                 zip(rep_results, y_preds_list), desc="Saving results", total=repetitions
@@ -918,8 +711,26 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistency):
             fold_models=fold_models if save_fold_models else None,
         )
 
+    def starmap_args(
+        self, repetitions: int, save_fold_accs: bool, seed: Optional[int]
+    ) -> Generator[Tuple[Any, ...], None, None]:
+        rngs = parallel_seed_generators(seed, repetitions)
+        model = self.model_factory.create
+        for i in range(repetitions):
+            yield (
+                self.x,
+                self.y,
+                self.x_sample_dim,
+                self.y_sample_dim,
+                self.n_splits,
+                self.stratify,
+                [model() for _ in range(self.n_splits)],
+                rngs[i],
+                save_fold_accs,
+            )
 
-class ErrorConsistencyInternalKFold(ErrorConsistency):
+
+class ErrorConsistencyInternalKFold(ErrorConsistencyBase):
     def __init__(
         self,
         model: Any,
@@ -1012,7 +823,6 @@ class ErrorConsistencyInternalKFold(ErrorConsistency):
                 predictions: Optional[List[ndarray]] = None
                 models: Optional[List[Any]] = None
         """
-        pass
 
 
 class ErrorConsistencyMonteCarlo:
