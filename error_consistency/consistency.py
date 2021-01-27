@@ -227,7 +227,7 @@ class ErrorConsistencyBase(ABC):
         stratify: bool = False,
         x_sample_dim: int = 0,
         y_sample_dim: int = 0,
-        empty_unions: str = "drop",
+        empty_unions: str = "zero",
     ) -> None:
         self.model: Model
         self.stratify: bool
@@ -273,7 +273,8 @@ class ErrorConsistencyBase(ABC):
         if y.ndim == 2:
             uniques = np.unique(y.ravel()).astype(int)
             if not np.array_equal(uniques, [0, 1]):
-                raise ValueError
+                raise ValueError("Only dummy-coded and one-hot coded 2D targets are supported.")
+
         return x, y, x_df, y_df
 
     @staticmethod
@@ -346,6 +347,33 @@ class ErrorConsistencyBase(ABC):
 
 class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
     """Compute error consistencies for a classifier.
+
+    Examples
+    --------
+
+    To fit a standard scikit-learn classifier::
+
+        from error_consistency.consistency import ErrorConsistencyKFoldHoldout
+        from sklearn.neighbors import KNeighboursClassifier as KNN
+
+        x = np.random.uniform(0, 1, size=[100, 5])
+        y = np.random.randint(0, 3, size=[100])
+        x_test = np.random.uniform(0, 1, size=[20, 5])
+        y_test = np.random.randint(0, 3, size=[20])
+
+        knn_args = dict(n_neighbors=5, n_jobs=1)
+        errcon = ErrorConsistency(KNN, x, y, model_args=knn_args)
+        results = errcon.evaluate(
+            repetitions=100,
+            show_progress=True,
+            parallel_reps=True,
+            loo_parallel=True,
+            turbo=True,
+        )
+
+        # All 500 = 5 * 100 consitencies:
+        print(results.consistencies)
+
 
     Parameters
     ----------
@@ -591,7 +619,8 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
             If True, `results.fold_models` is a NumPy object array of size (repetitions, k) where
             each entry (r, i) is the fitted model on repetition `r` fold `i`.
 
-        seed: int = None,
+        seed: int = None
+            Seed for reproducible results
 
         Returns
         -------
@@ -809,19 +838,13 @@ class ErrorConsistencyInternalKFold(ErrorConsistencyBase):
             If True also save the fitted models of each fold in `results.models`.
             If False (default), leave this property empty in the results.
 
-        seed: int = None,
+        seed: int = None
+            Seed for reproducible results
 
         Returns
         -------
         results: ConsistencyResults
-            A dataclass with properties:
-
-                consistencies: ndarray
-                consistency_matrices: List[ndarray]
-                scores: Optional[ndarray] = None
-                error_arrays: Optional[List[ndarray]] = None
-                predictions: Optional[List[ndarray]] = None
-                models: Optional[List[Any]] = None
+            The `error_consistency.containers.ConsistencyResults` object.
         """
 
 

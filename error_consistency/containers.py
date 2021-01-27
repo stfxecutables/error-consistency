@@ -15,7 +15,7 @@ class KFoldResults:
 
     :meta private:
 
-    Properties
+    Attributes
     ----------
     fitted_model: Model
         The fitted `error_consistency.model.Model`.
@@ -36,7 +36,7 @@ class KFoldResults:
 class ConsistencyResults:
     """Holds results from evaluating error consistency.
 
-    Properties
+    Attributes
     ----------
     consistencies: ndarray
         A flat array of all the pairwise consistencies. Length will be N*(N-1)/2, where for `n_rep`

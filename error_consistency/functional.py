@@ -131,11 +131,13 @@ def loo_consistencies(
     if parallel:
         args = [(lsets, empty_unions) for lsets in loo_sets]
         # https://stackoverflow.com/questions/53751050/python-multiprocessing-understanding-logic-behind-chunksize
+        chunksize = divmod(L, cpu_count() * 20)[0]
+        chunksize = 1 if chunksize < 1 else chunksize
         consistencies = process_map(
             loo_loop,
             args,
             max_workers=cpu_count(),
-            chunksize=divmod(L, cpu_count() * 20)[0],
+            chunksize=chunksize,
             desc="Computing leave-one-out error consistencies",
             total=L,
         )
@@ -203,6 +205,7 @@ def error_consistencies(
     empty_unions: UnionHandling = "zero",
     loo_parallel: bool = False,
     turbo: bool = False,
+    log_progress: bool = False,
 ) -> Tuple[ndarray, ndarray, ndarray, ndarray, ndarray]:
     """Get the error consistency for a list of predictions."""
     # y_preds must be (reps, n_samples), y_true must be (n_samples,) or (n_samples, 1) or
@@ -232,18 +235,22 @@ def error_consistencies(
 
     unpredictable_set = intersection(y_errs)
     predictable_set = union(y_errs)
-    print("Computing Leave-One-Out error consistencies ... ", end="", flush=True)
+    if log_progress:
+        print("Computing Leave-One-Out error consistencies ... ", end="", flush=True)
     loocs = loo_consistencies(y_errs, empty_unions, loo_parallel)
-    print("done.")
+    if log_progress:
+        print("done.")
 
     if turbo:
-        print("Computing pairwise error consistencies ... ", end="", flush=True)
+        if log_progress:
+            print("Computing pairwise error consistencies ... ", end="", flush=True)
         # we don't do the list in the numba call because this won't parallelize as well
         # i.e. you need the index into the consistencies array because you can't append
         matrix = error_consistencies_numba(np.array(y_errs), empty_unions)
         cs = matrix[np.triu_indices_from(matrix, 1)].ravel()
         consistencies = cs[~np.isnan(cs)] if empty_unions == "drop" else cs
-        print("done.")
+        if log_progress:
+            print("done.")
     else:
         consistencies, matrix = error_consistencies_slow(y_errs, empty_unions)
     return (np.array(consistencies), matrix, unpredictable_set, predictable_set, loocs)
