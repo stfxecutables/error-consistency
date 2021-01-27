@@ -27,12 +27,10 @@
 
    .. autosummary::
    
-      ConsistencyResults
-      ErrorConsistency
+      ErrorConsistencyBase
       ErrorConsistencyInternalKFold
       ErrorConsistencyKFoldHoldout
       ErrorConsistencyMonteCarlo
-      KFoldResults
    
    
 
