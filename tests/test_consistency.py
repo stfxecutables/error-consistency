@@ -141,15 +141,18 @@ class TestConsistency:
 
 class TestClassifiers:
     def test_knn(self, capsys: Any) -> None:
-        BIG_REPS = 10
+        BIG_REPS = 3  # no need in this case, err-con is entirely function of test set
         # order below is important
         COLS = ["Mean (pairs)", "sd (pairs)", "Mean (LOO)", "sd (LOO)", "Total"]
         with capsys.disabled():
             X, y = load_iris(return_X_y=True)
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+            np.random.seed(2)
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, shuffle=True, stratify=y
+            )
             knn_args = dict(n_neighbors=10, n_jobs=1)
             errcon = ErrorConsistencyKFoldHoldout(
-                model=KNN, x=X_train, y=y_train, n_splits=5, model_args=knn_args
+                model=KNN, x=X_train, y=y_train, n_splits=5, model_args=knn_args, stratify=True
             )
             df = pd.DataFrame(index=pd.Index(range(BIG_REPS), name="REP"), columns=COLS)
             for i in range(BIG_REPS):
@@ -160,10 +163,11 @@ class TestClassifiers:
                     save_fold_accs=True,
                     save_test_accs=True,
                     save_test_errors=True,
-                    empty_unions="zero",
+                    empty_unions="length",
                     parallel_reps=True,
                     loo_parallel=True,
                     turbo=True,
+                    # seed=42,
                 )
 
                 mean = np.mean(results.consistencies)
@@ -174,7 +178,7 @@ class TestClassifiers:
 
                 df.loc[i, COLS] = [mean, sd_pair, mean_loo, sd_loo, total]
 
-                print("Mean pairwise consistency ....... ", np.round(mean))
+                print("Mean pairwise consistency ....... ", np.round(mean, 4))
                 print("Mean leave-one-out consistency .. ", np.round(mean_loo, 4))
                 print("Total consistency ............... ", np.round(results.total_consistency, 4))
                 print("sd (pairwise) ................... ", np.std(results.consistencies, ddof=1))
