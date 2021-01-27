@@ -163,11 +163,11 @@ class TestClassifiers:
                     save_fold_accs=True,
                     save_test_accs=True,
                     save_test_errors=True,
-                    empty_unions="length",
+                    empty_unions=0,
                     parallel_reps=True,
                     loo_parallel=True,
                     turbo=True,
-                    # seed=42,
+                    seed=42,
                 )
 
                 mean = np.mean(results.consistencies)

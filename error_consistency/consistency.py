@@ -227,7 +227,7 @@ class ErrorConsistencyBase(ABC):
         stratify: bool = False,
         x_sample_dim: int = 0,
         y_sample_dim: int = 0,
-        empty_unions: str = "zero",
+        empty_unions: str = 0,
     ) -> None:
         self.model: Model
         self.stratify: bool
@@ -347,33 +347,6 @@ class ErrorConsistencyBase(ABC):
 
 class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
     """Compute error consistencies for a classifier.
-
-    Examples
-    --------
-
-    To fit a standard scikit-learn classifier::
-
-        from error_consistency.consistency import ErrorConsistencyKFoldHoldout
-        from sklearn.neighbors import KNeighboursClassifier as KNN
-
-        x = np.random.uniform(0, 1, size=[100, 5])
-        y = np.random.randint(0, 3, size=[100])
-        x_test = np.random.uniform(0, 1, size=[20, 5])
-        y_test = np.random.randint(0, 3, size=[20])
-
-        knn_args = dict(n_neighbors=5, n_jobs=1)
-        errcon = ErrorConsistency(KNN, x, y, model_args=knn_args)
-        results = errcon.evaluate(
-            repetitions=100,
-            show_progress=True,
-            parallel_reps=True,
-            loo_parallel=True,
-            turbo=True,
-        )
-
-        # All 500 = 5 * 100 consitencies:
-        print(results.consistencies)
-
 
     Parameters
     ----------
@@ -497,8 +470,20 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
         The axis or dimension along which samples are indexed. Needed for splitting y into
         partitions for k-fold only if the target is e.g. one-hot encoded or dummy-coded.
 
-    empty_unions: UnionHandling = "zero"
-        How to
+    empty_unions: UnionHandling = 0
+        When computing the pairwise consistency or leave-one-out consistency on small or
+        simple datasets, it can be the case that the union of the error sets is empty (e.g. if no
+        prediction errors are made). In this case the intersection over union is 0/0, which is
+        undefined.
+
+        * If `0` (default), the consistency for that collection of error sets is set to zero.
+        * If `1`, the consistency for that collection of error sets is set to one.
+        * If "nan", the consistency for that collection of error sets is set to `np.nan`.
+        * If "drop", the `consistencies` array will not include results for that collection,
+          but the consistency matrix will include `np.nans`.
+        * If "error", an empty union will cause a `ZeroDivisionError`.
+        * If "warn", an empty union will print a warning (probably a lot).
+
 
     Notes
     -----
@@ -534,7 +519,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
         stratify: bool = False,
         x_sample_dim: int = 0,
         y_sample_dim: int = 0,
-        empty_unions: UnionHandling = "zero",
+        empty_unions: UnionHandling = 0,
     ) -> None:
         super().__init__(
             model,
@@ -563,7 +548,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
         save_fold_accs: bool = False,
         save_fold_preds: bool = False,
         save_fold_models: bool = False,
-        empty_unions: UnionHandling = "zero",
+        empty_unions: UnionHandling = 0,
         show_progress: bool = True,
         parallel_reps: bool = False,
         loo_parallel: bool = False,
@@ -625,7 +610,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
         Returns
         -------
         results: ConsistencyResults
-            A `error_consistency.consistency.ConsistencyResults` object.
+            An `error_consistency.containers.ConsistencyResults` object.
         """
 
         self.x_test, self.y_test = self.save_x_y(x_test, y_test)[0:2]

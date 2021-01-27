@@ -17,14 +17,20 @@ from tqdm import tqdm
 
 from error_consistency.utils import to_numpy
 
-UNION_OPTIONS = ["nan", "drop", "error", "warn", "zero", "+1", "length"]
+UNION_OPTIONS = [0, 1, "nan", "drop", "warn", "error"]
 ArrayLike = Union[ndarray, DataFrame, Series]
-UnionHandling = Literal["nan", "drop", "error", "warn", "zero", "+1", "length"]
+UnionHandling = Literal[0, 1, "nan", "drop", "warn", "error"]
 """UnionHandling"""
+_UnionHandling = Literal["0", "1", "nan", "drop", "warn", "error"]
+
+Normalization = Literal[None, "length", "intersection"]
+_Normalization = Literal["", "length", "intersection"]
 
 
 @jit(nopython=True, parallel=True, cache=True)
-def error_consistencies_numba(y_errs: ndarray, empty_unions: UnionHandling = "nan") -> ndarray:
+def error_consistencies_numba(
+    y_errs: ndarray, empty_unions: _UnionHandling = "nan", norm: _Normalization = ""
+) -> ndarray:
     L = len(y_errs)
     matrix = np.nan * np.ones((L, L))
     for i in prange(L):
@@ -43,16 +49,15 @@ def error_consistencies_numba(y_errs: ndarray, empty_unions: UnionHandling = "na
                 elif empty_unions == "nan":
                     matrix[i, j] = matrix[j, i] = np.nan
                     continue
-                elif empty_unions == "zero":
+                elif empty_unions == "0":
                     matrix[i, j] = matrix[j, i] = 0.0
                     continue
-                elif empty_unions == "+1":
-                    local_union += 1.0
-                elif empty_unions == "length":
-                    local_union = len(err_i)
+                elif empty_unions == "1":
+                    matrix[i, j] = matrix[j, i] = 1.0
+                    continue
                 else:
                     local_union = -0.00000001
-            if empty_unions == "length":
+            if norm == "length":
                 local_union = len(err_i)
             score = np.sum(err_i & err_j) / local_union
             matrix[i, j] = matrix[j, i] = score
@@ -60,7 +65,7 @@ def error_consistencies_numba(y_errs: ndarray, empty_unions: UnionHandling = "na
 
 
 def error_consistencies_slow(
-    y_errs: List[ndarray], empty_unions: UnionHandling = "zero"
+    y_errs: List[ndarray], empty_unions: _UnionHandling = "0", norm: _Normalization = ""
 ) -> Tuple[ndarray, ndarray]:
     consistencies = []
     matrix = np.eye(len(y_errs), dtype=float)
@@ -78,17 +83,23 @@ def error_consistencies_slow(
                 elif empty_unions == "nan":
                     consistencies.append(np.nan)
                     continue
-                elif empty_unions == "zero":
+                elif empty_unions == "0":
                     consistencies.append(0)
                     matrix[i, j] = matrix[j, i] = 0
                     continue
-                elif empty_unions == "+1":
-                    local_union += 1
-                elif empty_unions == "length":
-                    local_union = len(err_i)
+                elif empty_unions == "1":
+                    consistencies.append(1)
+                    matrix[i, j] = matrix[j, i] = 1
+                    continue
+                elif empty_unions == "warn":
+                    warn(f"Empty union in comparison ({i}, {j})")
+                    consistencies.append(np.nan)
+                    continue
+                elif empty_unions == "error":
+                    raise ZeroDivisionError(f"Empty union in comparison ({i}, {j})")
                 else:
                     raise ValueError("Unreachable!")
-            if empty_unions == "length":
+            if norm == "length":
                 local_union = len(err_i)
             score = np.sum(err_i & err_j) / local_union
             consistencies.append(score)
@@ -100,8 +111,8 @@ def error_consistencies_slow(
     return np.array(consistencies), matrix
 
 
-def loo_loop(args: Tuple[ndarray, UnionHandling]) -> Optional[ndarray]:
-    lsets, empty_unions = args
+def loo_loop(args: Tuple[ndarray, _UnionHandling, _Normalization]) -> Optional[ndarray]:
+    lsets, empty_unions, norm = args
 
     numerator = np.sum(intersection(list(lsets)))
     denom = np.sum(union(list(lsets)))
@@ -110,26 +121,32 @@ def loo_loop(args: Tuple[ndarray, UnionHandling]) -> Optional[ndarray]:
             return None
         elif empty_unions == "nan":
             return None
-        elif empty_unions == "zero":
+        elif empty_unions == "0":
             return 0.0
-        elif empty_unions == "+1":
-            denom += 1.0
-        elif empty_unions == "length":
-            denom = len(lsets[0])
+        elif empty_unions == "1":
+            return 1.0
+        elif empty_unions == "warn":
+            warn("Empty union in leave-one-out error sets.")
+            return None
+        elif empty_unions == "error":
+            raise ZeroDivisionError("Empty union in leave-one-out error sets.")
         else:
             raise ValueError("Unreachable!")
-    if empty_unions == "length":
+    if norm == "length":
         denom = len(lsets[0])
     return numerator / denom
 
 
 def loo_consistencies(
-    y_errs: List[ndarray], empty_unions: UnionHandling = "zero", parallel: bool = False
+    y_errs: List[ndarray],
+    empty_unions: _UnionHandling = "0",
+    parallel: bool = False,
+    norm: _Normalization = "",
 ) -> ndarray:
     L = len(y_errs)
     loo_sets = combinations(y_errs, L - 1)  # leave-one out
     if parallel:
-        args = [(lsets, empty_unions) for lsets in loo_sets]
+        args = [(lsets, empty_unions, norm) for lsets in loo_sets]
         # https://stackoverflow.com/questions/53751050/python-multiprocessing-understanding-logic-behind-chunksize
         chunksize = divmod(L, cpu_count() * 20)[0]
         chunksize = 1 if chunksize < 1 else chunksize
@@ -158,16 +175,20 @@ def loo_consistencies(
                 elif empty_unions == "nan":
                     consistencies.append(np.nan)
                     continue
-                elif empty_unions == "zero":
+                elif empty_unions == "0":
                     consistencies.append(0.0)
                     continue
-                elif empty_unions == "+1":
-                    denom += 1.0
-                elif empty_unions == "length":
-                    denom = len(lset[0])
+                elif empty_unions == "1":
+                    consistencies.append(1.0)
+                    continue
+                elif empty_unions == "warn":
+                    warn("Empty union in leave-one-out error sets.")
+                    return None
+                elif empty_unions == "error":
+                    raise ZeroDivisionError("Empty union in leave-one-out error sets.")
                 else:
                     raise ValueError("Unreachable!")
-            if empty_unions == "length":
+            if norm == "length":
                 denom = len(lset[0])
             consistencies.append(numerator / denom)
     return np.array(consistencies)
@@ -202,42 +223,92 @@ def error_consistencies(
     y_preds: List[ndarray],
     y_true: ndarray,
     sample_dim: int = 0,
-    empty_unions: UnionHandling = "zero",
+    empty_unions: UnionHandling = 0,
     loo_parallel: bool = False,
     turbo: bool = False,
     log_progress: bool = False,
 ) -> Tuple[ndarray, ndarray, ndarray, ndarray, ndarray]:
-    """Get the error consistency for a list of predictions."""
+    """Get the error consistency for a list of predictions.
+
+    Parameters
+    ----------
+    y_preds: List[ndarray]
+        A list of numpy arrays of predictions, all on the same test set.
+
+    y_true: ndarray
+        The true values against which each of `y_preds` will be compared.
+
+    sample_dim: int = 0
+        The dimension along which samples are indexed for `y_true` and each array of `y_preds`.
+
+    empty_unions: UnionHandling = 0
+        When computing the pairwise consistency or leave-one-out consistency on small or
+        simple datasets, it can be the case that the union of the error sets is empty (e.g. if no
+        prediction errors are made). In this case the intersection over union is 0/0, which is
+        undefined.
+
+        * If `0` (default), the consistency for that collection of error sets is set to zero.
+        * If `1`, the consistency for that collection of error sets is set to one.
+        * If "nan", the consistency for that collection of error sets is set to `np.nan`.
+        * If "drop", the `consistencies` array will not include results for that collection,
+          but the consistency matrix will include `np.nans`.
+        * If "error", an empty union will cause a `ZeroDivisionError`.
+        * If "warn", an empty union will print a warning (probably a lot).
+
+    loo_parallel: bool = False
+        If True, use multiprocessing to parallelize the computation of the leave-one-out error
+        consistencies.
+
+    turbo: bool = False
+        If True, use Numba-accelerated error consistency calculation.
+
+    log_progress: bool = False
+        If True, show a progress bar when computing the leave-one-out error consistencies.
+
+    Returns
+    -------
+    consistencies: ndarray
+        An array of the computed consistency values. Length will depend on `empty_unions`.
+
+    matrix: ndarray
+        An array of size ``(N, N)`` of the pairwise consistency values (IOUs) where
+        `N = len(y_preds)`, and where entry ``(i, j)`` is the pairwise IOU for predictions ``i`` and
+        predictions ``j``.
+
+    intersection: ndarray
+        The total intersection of all error sets. When nonzero, can be useful for identifying
+        unpredictable samples.
+
+    union: ndarray
+        The total union of all error sets. Will almost always be non-empty except for trivial
+        datasets, and thus computing ``np.sum(intersection) / np.sum(union)`` gives something like a
+        lower bound on the consistencies.
+
+    loo_consistencies: ndarray
+        The IOUs or consistencies computed from applying the union and intesection operations over
+        all combinations of `y_preds` of size `len(y_preds) - 1`. Sort of a symmetric counterpart
+        to the default pairwise consistency.
+    """
     # y_preds must be (reps, n_samples), y_true must be (n_samples,) or (n_samples, 1) or
     # (n_samples, n_features)
     if empty_unions not in UNION_OPTIONS:
         raise ValueError(
             f"Invalid option for handling empty unions. Must be one of {UNION_OPTIONS}"
         )
+    if empty_unions in [0, 1]:
+        empty_unions = str(empty_unions)  # type: ignore
+
     if not isinstance(y_preds, list) or len(y_preds) < 2:  # type: ignore
         raise ValueError("`y_preds` must be a list of predictions with length > 1.")
 
     y_preds = list(map(to_numpy, y_preds))
     y_errs = [get_y_error(y_pred, y_true, sample_dim) for y_pred in y_preds]
 
-    n_flubs = np.sum([np.all(e) for e in y_errs])  # a flub is where all predictions are wrong
-    if n_flubs > 1:
-        if empty_unions == "warn":
-            warn(
-                "Two or more of your predictions are all in error. These will create undefined "
-                "error consistencies for those pairings"
-            )
-        if empty_unions == "error":
-            raise ZeroDivisionError(
-                "Two or more of your predictions are all in error. These will create undefined "
-                "error consistencies for those pairings"
-            )
-
     unpredictable_set = intersection(y_errs)
     predictable_set = union(y_errs)
     if log_progress:
         print("Computing Leave-One-Out error consistencies ... ", end="", flush=True)
-    loocs = loo_consistencies(y_errs, empty_unions, loo_parallel)
+    loocs = loo_consistencies(y_errs, empty_unions, loo_parallel)  # type: ignore
     if log_progress:
         print("done.")
 

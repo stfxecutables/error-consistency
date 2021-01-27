@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.abspath("../"))
 # -- Project information -----------------------------------------------------
 
 project = "error-consistency"
-copyright = "2021, Derek Berger"
+copyright = "2021, Derek Berger, Jacob Levman"
 author = "Derek Berger"
 
 
