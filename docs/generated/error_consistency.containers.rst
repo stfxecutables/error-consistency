@@ -1,4 +1,4 @@
-﻿error\_consistency.containers
+error\_consistency.containers
 =============================
 
 .. automodule:: error_consistency.containers

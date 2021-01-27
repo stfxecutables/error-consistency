@@ -16,6 +16,7 @@ Core API
 .. autosummary::
    :recursive:
    :toctree: generated/
+      :maxdepth: 3
 
    error_consistency.consistency
    error_consistency.containers

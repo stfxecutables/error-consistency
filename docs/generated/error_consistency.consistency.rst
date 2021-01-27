@@ -1,4 +1,4 @@
-﻿error\_consistency.consistency
+error\_consistency.consistency
 ==============================
 
 .. automodule:: error_consistency.consistency
@@ -13,11 +13,7 @@
 
    .. autosummary::
    
-      array_indexer
-      get_test_predictions
       validate_fold
-      validate_kfold
-      validate_kfold_imap
    
    
 

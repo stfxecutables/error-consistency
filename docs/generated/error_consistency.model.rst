@@ -1,4 +1,4 @@
-﻿error\_consistency.model
+error\_consistency.model
 ========================
 
 .. automodule:: error_consistency.model

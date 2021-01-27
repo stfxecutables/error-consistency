@@ -1,4 +1,4 @@
-﻿error\_consistency.functional
+error\_consistency.functional
 =============================
 
 .. automodule:: error_consistency.functional
