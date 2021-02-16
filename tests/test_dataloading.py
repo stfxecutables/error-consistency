@@ -2,6 +2,7 @@ import pytest
 from tests.loading import load_diabetes, load_park, load_trans, load_SPECT
 
 
+@pytest.mark.fast
 def test_loading_functions() -> None:
     x, y = load_diabetes()
     assert x.shape == (768, 8)

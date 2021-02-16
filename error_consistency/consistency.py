@@ -227,7 +227,7 @@ class ErrorConsistencyBase(ABC):
         stratify: bool = False,
         x_sample_dim: int = 0,
         y_sample_dim: int = 0,
-        empty_unions: str = 0,
+        empty_unions: UnionHandling = 0,
     ) -> None:
         self.model: Model
         self.stratify: bool
@@ -745,6 +745,165 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
 
 
 class ErrorConsistencyInternalKFold(ErrorConsistencyBase):
+    """Compute error consistencies for a classifier.
+
+    Parameters
+    ----------
+    model: Intersection[Callable, Type]
+        A *class* where instances are classifiers that implement:
+
+        1. A ``.fit`` or ``.train`` method that:
+
+           * accepts predictors and targets, plus `fit_args`, and
+           * updates the state of `model` when calling `.fit` or `.train`
+
+        2. A ``.predict`` or ``.test`` method, that:
+
+           * accepts testing samples, plus ``predict_args``, and
+           * requires having called ``.fit`` previously, and
+           * returns *only* the predictions as a single ArrayLike (e.g. NumPy array, List, pandas
+             DataFrame or Series)
+
+        .. _valid model example:
+
+        E.g.::
+
+            import numpy as np
+            from error_consistency import ErrorConsistency
+            from sklearn.cluster import KNeighborsClassifier as KNN
+
+            knn_args = dict(n_neighbors=5, n_jobs=1)
+            errcon = ErrorConsistency(model=KNN, model_args=knn_args)
+
+            # KNN is appropriate here because we could write e.g.
+            x = np.random.uniform(0, 1, size=[100, 5])
+            y = np.random.randint(0, 3, size=[100])
+            x_test = np.random.uniform(0, 1, size=[20, 5])
+            y_test = np.random.randint(0, 3, size=[20])
+
+            KNN.fit(x, y)  # updates the state, no need to use a returned value
+            y_pred = KNN.predict(x_test)  # returns a single object
+
+
+    x: Union[List, pandas.DataFrame, pandas.Series, numpy.ndarray]
+        ArrayLike object containing predictor samples. Must be in a format that is consumable with
+        `model.fit(x, y, **model_args)` for arguments `model` and `model_args`. By default,
+        splitting of x into cross-validation subsets will be along the first axis (axis 0), that is,
+        the first axis is assumed to be the sample dimension. If your fit method requires a
+        different sample dimension, you can specify this in `x_sample_dim`.
+
+    y: Union[List, pandas.DataFrame, pandas.Series, numpy.ndarray]
+        ArrayLike object containing targets. Must be in a format that is consumable with
+        `model.fit(x, y, **model_args)` for arguments `model` and `model_args`. By default,
+        splitting of y into cross-validation subsets will be along the first axis (axis 0), that is,
+        the first axis is assumed to be the sample dimension. If your fit method requires a
+        different sample dimension (e.g. y is a one-hot encoded array), you can specify this
+        in `y_sample_dim`.
+
+    n_splits: int = 5
+        How many folds to use, and thus models to generate, per repetition.
+
+    model_args: Optional[Dict[str, Any]]
+        Any arguments that are required each time to construct a fresh instance of the model (see
+        the `valid model example`_ above). Note that the data x and y must NOT be included here.
+
+    fit_args: Optional[Dict[str, Any]]
+        Any arguments that are required each time when calling the `.fit` or `.train` methods
+        internally (see the `valid model example`_ above). Note that the data x and y must NOT be
+        included here.
+
+    fit_args_x_y: Optional[Tuple[str, str]] = None
+        Name of the arguments which data `x` and target `y` are passed to. This is needed because
+        different libraries may have different conventions for how they expect predictors and
+        targets to be passed in to `fit` or `train`. For example, a function may have the
+        signature::
+
+            f(predictor: ndarray, target: ndarray) -> Any
+
+        To allow our internal `x_train` and `x_test` splits to be passed to the right arguments,
+        we thus need to know these names.
+
+        If None (default), it will be assumed that the `.fit` or `.train` method of the instance of
+        `model` takes x as its first positional argument, and `y` as its second, as in e.g.
+        `model.fit(x, y, **model_args)`.
+
+        If a tuple of strings (x_name, y_name), then a dict will be constructed internally by
+        splatting, e.g.::
+
+            args_dict = {**{x_name: x_train, y_name: y_train}, **model_args}
+            model.fit(**args_dict)
+
+        Alternately, see the documentation for `error_consistency.model.Model` for how to subclass
+        your own function here if you require more fine-grained control of how arguments are passed
+        into the fit and predict calls.
+
+    predict_args: Optional[Dict[str, Any]]
+        Any arguments that are required each time when calling the `.predict` or `.test` methods
+        internally (see the `valid model example`_ above). Note that the data x must NOT be included
+        here.
+
+    predict_args_x: Optional[str] = None
+        Name of the argument which data `x` is passed to during evaluation. This is needed because
+        different libraries may have different conventions for how they expect predictors and
+        targets to be passed in to `predict` or `test` calls.
+
+        If None (default), it will be assumed that the `.predict` or `.test` method of the instance
+        of `model` takes x as its first positional argument, as in e.g.
+        `model.predict(x, **predict_args)`.
+
+        If `predict_args_x` is a string, then a dict will be constructed internally with this
+        string, e.g.::
+
+            args_dict = {**{predict_args_x: x_train}, **model_args}
+            model.predict(**args_dict)
+
+    stratify: bool = False
+        If True, use sklearn.model_selection.StratifiedKFold during internal k-fold. Otherwise, use
+        sklearn.model_selection.KFold.
+
+    x_sample_dim: int = 0
+        The axis or dimension along which samples are indexed. Needed for splitting x into
+        partitions for k-fold.
+
+    y_sample_dim: int = 0
+        The axis or dimension along which samples are indexed. Needed for splitting y into
+        partitions for k-fold only if the target is e.g. one-hot encoded or dummy-coded.
+
+    empty_unions: UnionHandling = 0
+        When computing the pairwise consistency or leave-one-out consistency on small or
+        simple datasets, it can be the case that the union of the error sets is empty (e.g. if no
+        prediction errors are made). In this case the intersection over union is 0/0, which is
+        undefined.
+
+        * If `0` (default), the consistency for that collection of error sets is set to zero.
+        * If `1`, the consistency for that collection of error sets is set to one.
+        * If "nan", the consistency for that collection of error sets is set to `np.nan`.
+        * If "drop", the `consistencies` array will not include results for that collection,
+          but the consistency matrix will include `np.nans`.
+        * If "error", an empty union will cause a `ZeroDivisionError`.
+        * If "warn", an empty union will print a warning (probably a lot).
+
+
+    Notes
+    -----
+    Conceptually, for each repetition, there are two steps to computing a k-fold error consistency
+    with holdout set:
+
+        (1) evaluation on standard k-fold ("validation" or "folding")
+        (2) evaluation on holdout set (outside of k-fold) ("testing")
+
+    There are a lot of overlapping terms and concepts here, so with analogy to deep learning, we
+    shall refer to step (1) as *validation* or *val* and step (2) as *testing* or *test*. This will
+    help keep variable names and function arguments sane and clear. We refer to the *entire* process
+    of validation + testing as *evaluation*. Thus the .evaluate() method with have both validation
+    and testing steps, in this terminology.
+
+    Since validation is very much just standard k-fold, we also thus refer to validation steps as
+    *fold* steps. So for example validation or fold scores are the k accuracies on the non-training
+    partitions of each k-fold repetition (k*repetitions total), but test scores are the
+    `repititions` accuracies on the heldout test set.
+    """
+
     def __init__(
         self,
         model: Any,
@@ -759,6 +918,7 @@ class ErrorConsistencyInternalKFold(ErrorConsistencyBase):
         stratify: bool,
         x_sample_dim: int,
         y_sample_dim: int,
+        empty_unions: UnionHandling = 0,
     ) -> None:
         super().__init__(
             model,
@@ -773,6 +933,7 @@ class ErrorConsistencyInternalKFold(ErrorConsistencyBase):
             stratify=stratify,
             x_sample_dim=x_sample_dim,
             y_sample_dim=y_sample_dim,
+            empty_unions=empty_unions,
         )
 
     def evaluate(
@@ -831,6 +992,30 @@ class ErrorConsistencyInternalKFold(ErrorConsistencyBase):
         results: ConsistencyResults
             The `error_consistency.containers.ConsistencyResults` object.
         """
+        seeds = random_seeds(seed, repetitions)
+
+        if self.stratify:
+            kfolds = [
+                StratifiedKFold(n_splits=self.n_splits, shuffle=True, random_state=seed)
+                for seed in seeds
+            ]
+        else:
+            kfolds = [
+                KFold(n_splits=self.n_splits, shuffle=True, random_state=seed) for seed in seeds
+            ]
+
+        test_errors: List[ndarray] = []
+        test_accs: ndarray = []
+        test_predictions: ndarray = []
+
+        fold_accs: ndarray = []
+        fold_predictions: ndarray = []
+        fold_models: ndarray = []
+        idx = np.arange(0, int(self.x.shape[self.x_sample_dim]), dtype=int)
+        if self.y.ndim == 2:
+            y_split = np.argmax(self.y, axis=1 - np.abs(self.y_sample_dim))  # convert to labels
+        else:
+            y_split = self.y
 
 
 class ErrorConsistencyMonteCarlo:
