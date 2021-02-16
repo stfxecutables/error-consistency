@@ -195,6 +195,14 @@ def loo_consistencies(
 
 
 def get_y_error(y_pred: ndarray, y_true: ndarray, sample_dim: int = 0) -> ndarray:
+    """Returns the
+
+    Returns
+    -------
+    error_set: ndarray
+        The boolean array with length `n_samples` where y_pred != y_true. For one-hot or dummy `y`,
+        this is still computed such that the length of the returned array is `n_samples`.
+    """
     if y_pred.ndim != y_true.ndim:
         raise ValueError("`y_pred` and `y_true` must have the same dimensionality.")
     sample_dim = int(np.abs(sample_dim))
