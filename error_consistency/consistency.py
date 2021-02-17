@@ -744,7 +744,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
             )
 
 
-class ErrorConsistencyInternalKFold(ErrorConsistencyBase):
+class ErrorConsistencyKFoldInternal(ErrorConsistencyBase):
     """Compute error consistencies for a classifier.
 
     Parameters
@@ -783,7 +783,6 @@ class ErrorConsistencyInternalKFold(ErrorConsistencyBase):
 
             KNN.fit(x, y)  # updates the state, no need to use a returned value
             y_pred = KNN.predict(x_test)  # returns a single object
-
 
     x: Union[List, pandas.DataFrame, pandas.Series, numpy.ndarray]
         ArrayLike object containing predictor samples. Must be in a format that is consumable with
@@ -910,14 +909,14 @@ class ErrorConsistencyInternalKFold(ErrorConsistencyBase):
         x: ndarray,
         y: ndarray,
         n_splits: int,
-        model_args: Optional[Dict[str, Any]],
-        fit_args: Optional[Dict[str, Any]],
-        fit_args_x_y: Optional[Tuple[str, str]],
-        predict_args: Optional[Dict[str, Any]],
-        predict_args_x: Optional[str],
-        stratify: bool,
-        x_sample_dim: int,
-        y_sample_dim: int,
+        model_args: Optional[Dict[str, Any]] = None,
+        fit_args: Optional[Dict[str, Any]] = None,
+        fit_args_x_y: Optional[Tuple[str, str]] = None,
+        predict_args: Optional[Dict[str, Any]] = None,
+        predict_args_x: Optional[str] = None,
+        stratify: bool = True,
+        x_sample_dim: int = 0,
+        y_sample_dim: int = 0,
         empty_unions: UnionHandling = 0,
     ) -> None:
         super().__init__(
@@ -938,13 +937,18 @@ class ErrorConsistencyInternalKFold(ErrorConsistencyBase):
 
     def evaluate(
         self,
-        repetitions: int,
-        compute_scores: bool,
-        save_error_arrays: bool,
-        save_predictions: bool,
-        save_kfold_predictions: bool,
-        save_models: bool,
-        seed: int,
+        repetitions: int = 5,
+        save_test_accs: bool = True,
+        save_test_errors: bool = False,
+        save_test_predictions: bool = False,
+        save_fold_accs: bool = False,
+        save_fold_preds: bool = False,
+        save_fold_models: bool = False,
+        show_progress: bool = True,
+        parallel_reps: bool = False,
+        loo_parallel: bool = False,
+        turbo: bool = False,
+        seed: int = None,
     ) -> ConsistencyResults:
         """Evaluate the error consistency of the classifier.
 
@@ -958,31 +962,33 @@ class ErrorConsistencyInternalKFold(ErrorConsistencyBase):
             Useful for quick checks / fast estimates of upper bounds on the error consistency, but
             otherwise not recommended.
 
-        compute_scores: bool = True
-            If True (default) also compute accuracy scores for each fold and save them in
-            `results.scores`. If False, `x_test` and `y_test` are not None, only compute predictions
-            on `x_test`, and not testing subsets of each k-fold partition. Useful if prediction is
-            expensive or otherwise not needed.
+        save_test_accs: bool = True
+            If True (default) also compute accuracy scores for each fold on `x_test` and save them
+            in `results.scores`. If False, skip this step. Setting to `False` is useful when
+            prediction is expensive and/or you only care about evaulating the error consistency.
 
-        save_error_arrays: bool = False,
-            If True also save the boolean arrays indicating the error locations of each fold in
-            `results.error_arrays`. If False (default), leave this property empty in the results.
-            Note if `x_test` and `y_test` are provided, the error arrays are on these values, but if
-            `x_test` and `y_test` are not provided, error arrays are on the k-fold predictions.
+        save_test_errors: bool = False
+            If True, save a list of the boolean error arrays (`y_pred_i != y_test` for fold `i`) for
+            all repetitions in `results.test_errors`. Total of `k * repetitions` values if k > 1.
+            If False (default), `results.test_errors` will be `None`.
 
-        save_predictions: bool = False
-            If True and `x_test` and `y_test` are not None, also save the predicted target values on
-            `x_test` for each each fold in `results.val_predictions`. If False (default), leave this
-            property empty in the results.
+        save_test_predictions: bool = False
+            If True, save an array of the predictions `y_pred_i` for fold `i` for all repetitions in
+            `results.test_predictions`. Total of `k * repetitions` values if k > 1. If False
+            (default), `results.test_predictions` will be `None`.
 
-        save_kfold_predictions: bool = False
-            If True also save the predicted target values of each internal k-fold in
-            `results.fold_predictions`. If False (default), leave this property empty in the
-            results.
+        save_fold_accs: bool = False
+            If True, save an array of shape `(repetitions, k)` of the predictions on the *fold* test
+            set (`y_pred_fold_i` for fold `i`) for all repetitions in `results.fold_accs`.
 
-        save_models: bool = False,
-            If True also save the fitted models of each fold in `results.models`.
-            If False (default), leave this property empty in the results.
+        save_fold_preds: bool = False
+            If True, save a NumPy array of shape `(repetitions, k, n_samples)` of the predictions on
+            the *fold* test set (`y_pred_fold_i` for fold `i`) for all repetitions in
+            `results.fold_predictions`.
+
+        save_fold_models: bool = False
+            If True, `results.fold_models` is a NumPy object array of size (repetitions, k) where
+            each entry (r, i) is the fitted model on repetition `r` fold `i`.
 
         seed: int = None
             Seed for reproducible results
@@ -1016,6 +1022,65 @@ class ErrorConsistencyInternalKFold(ErrorConsistencyBase):
             y_split = np.argmax(self.y, axis=1 - np.abs(self.y_sample_dim))  # convert to labels
         else:
             y_split = self.y
+        if not parallel_reps:
+            rep_desc, fold_desc = "K-fold Repetition {}", "Fold {}"
+            rep_pbar = tqdm(total=repetitions, desc=rep_desc.format(0), leave=True)
+            for rep, kfold in enumerate(kfolds):  # we have `repetitions` ("rep") kfold partitions
+                fold_combined_preds = np.full_like(y_split, -1)
+                rep_pbar.set_description(rep_desc.format(rep))
+                fold_pbar = tqdm(total=self.n_splits, desc=fold_desc.format(0), leave=False)
+
+                for k, (train_idx, test_idx) in enumerate(kfold.split(idx, y_split)):
+                    fold_pbar.set_description(fold_desc.format(k))
+                    # We have `save_fold_accs=True` below because we need to run the predictions
+                    # to assemble the piecewise predictions, regardless of whether or not we save
+                    # the piecewise predictions individually later
+                    results = self.validate_fold(train_idx, test_idx, save_fold_accs=True)
+                    y_pred = results.prediction
+                    fold_combined_preds[test_idx] = y_pred
+                    if save_fold_accs:
+                        fold_accs.append(results.score)
+                    if save_fold_preds:
+                        fold_predictions.append(y_pred)
+                    if save_fold_models:
+                        fold_models.append(results.fitted_model)
+                    fold_pbar.update()
+                fold_pbar.close()
+
+                y_pred = fold_combined_preds
+                y_err = get_y_error(y_pred, y_split, self.y_sample_dim)
+                acc = 1 - np.mean(y_err)
+                test_predictions.append(y_pred)
+                test_accs.append(acc)
+                test_errors.append(y_err)
+                rep_pbar.update()
+            rep_pbar.close()
+        else:
+            raise NotImplementedError()
+        errcon_results = error_consistencies(
+            y_preds=test_predictions,
+            y_true=y_split,
+            sample_dim=self.y_sample_dim,
+            empty_unions=self.empty_unions,
+            loo_parallel=loo_parallel,
+            turbo=turbo,
+        )
+        consistencies, matrix, unpredictables, predictables, loo_consistencies = errcon_results
+        numerator = np.sum(unpredictables)
+        total = numerator / np.sum(predictables) if numerator > 0 else 0
+
+        return ConsistencyResults(
+            consistencies=consistencies,
+            matrix=matrix,
+            total_consistency=total,
+            leave_one_out_consistency=np.mean(loo_consistencies),
+            test_errors=test_errors if save_test_errors else None,
+            test_accs=test_accs if save_fold_accs else None,
+            test_predictions=test_predictions if save_test_predictions else None,
+            fold_accs=fold_accs if save_fold_accs else None,
+            fold_predictions=fold_predictions if save_fold_preds else None,
+            fold_models=fold_models if save_fold_models else None,
+        )
 
 
 class ErrorConsistencyMonteCarlo:
