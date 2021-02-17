@@ -155,8 +155,11 @@ class TestInternalConsistency:
                 save_fold_accs=True,
                 save_test_accs=True,
                 save_test_errors=True,
+                save_test_predictions=True,
                 turbo=True,
             )
+            for preds in results.test_predictions:
+                assert -1 not in preds.ravel()
 
             print("Mean pairwise consistency ....... ", np.round(np.mean(results.consistencies), 4))
             print(
@@ -176,13 +179,16 @@ class TestInternalConsistency:
             errcon = ErrorConsistencyKFoldInternal(
                 model=KNN, x=X, y=y, n_splits=5, model_args=knn_args
             )
-            errcon.evaluate(
+            results = errcon.evaluate(
                 repetitions=100,
                 save_fold_accs=True,
                 save_test_accs=True,
                 save_test_errors=True,
+                save_test_predictions=True,
                 turbo=True,
             )
+            for preds in results.test_predictions:
+                assert -1 not in preds.ravel()
 
     def test_slow(self, capsys: Any) -> None:
         with capsys.disabled():
@@ -192,13 +198,16 @@ class TestInternalConsistency:
                 model=KNN, x=X, y=y, n_splits=5, model_args=knn_args
             )
             # for _ in range(10):
-            errcon.evaluate(
+            results = errcon.evaluate(
                 repetitions=100,
                 save_fold_accs=True,
                 save_test_accs=True,
                 save_test_errors=True,
+                save_test_predictions=True,
                 turbo=False,
             )
+            for preds in results.test_predictions:
+                assert -1 not in preds.ravel()
 
     def test_parallel_reps(self, capsys: Any) -> None:
         with capsys.disabled():
@@ -212,9 +221,12 @@ class TestInternalConsistency:
                 save_fold_accs=True,
                 save_test_accs=True,
                 save_test_errors=True,
+                save_test_predictions=True,
                 parallel_reps=True,
                 turbo=True,
             )
+            for preds in results.test_predictions:
+                assert -1 not in preds.ravel()
             print("Mean pairwise consistency ....... ", np.round(np.mean(results.consistencies), 4))
             print(
                 "Mean leave-one-out consistency .. ", np.round(results.leave_one_out_consistency, 4)
@@ -238,10 +250,13 @@ class TestInternalConsistency:
                 save_fold_accs=True,
                 save_test_accs=True,
                 save_test_errors=True,
+                save_test_predictions=True,
                 parallel_reps=True,
                 loo_parallel=True,
                 turbo=True,
             )
+            for preds in results.test_predictions:
+                assert -1 not in preds.ravel()
             print("Mean pairwise consistency ....... ", np.round(np.mean(results.consistencies), 4))
             print(
                 "Mean leave-one-out consistency .. ", np.round(results.leave_one_out_consistency, 4)

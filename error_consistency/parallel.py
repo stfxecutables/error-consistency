@@ -69,7 +69,7 @@ def validate_kfold(
             y_val = array_indexer(y, y_sample_dim, val_idx)
             y_pred = model.predict(x_val)
             acc = 1 - np.mean(get_y_error(y_pred, y_val, y_sample_dim))
-        results.append(KFoldResults(model, acc, y_pred))
+        results.append(KFoldResults(model, acc, y_pred, val_idx))
 
     return results
 
@@ -82,6 +82,17 @@ def validate_kfold_imap(args: Any) -> List[KFoldResults]:
 def get_test_predictions(args: Any) -> List[ndarray]:
     """:meta private:"""
     results_list, x_test = args
+    y_preds = []
+    for results in results_list:
+        fitted = results.fitted_model
+        y_pred = fitted.predict(x_test)
+        y_preds.append(y_pred)
+    return y_preds
+
+
+def get_test_predictions_internal(args: Any) -> List[ndarray]:
+    """:meta private:"""
+    results_list = args
     y_preds = []
     for results in results_list:
         fitted = results.fitted_model

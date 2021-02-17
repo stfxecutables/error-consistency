@@ -14,7 +14,11 @@ from tqdm.contrib.concurrent import process_map
 from error_consistency.containers import ConsistencyResults, KFoldResults
 from error_consistency.functional import UnionHandling, error_consistencies, get_y_error
 from error_consistency.model import Model, ModelFactory
-from error_consistency.parallel import get_test_predictions, validate_kfold_imap
+from error_consistency.parallel import (
+    get_test_predictions,
+    get_test_predictions_internal,
+    validate_kfold_imap,
+)
 from error_consistency.random import parallel_seed_generators, random_seeds
 from error_consistency.utils import array_indexer, to_numpy
 
@@ -68,7 +72,7 @@ def validate_fold(
         y_pred = model.predict(x_val)
         acc = 1 - np.mean(get_y_error(y_pred, y_val, y_sample_dim))
 
-    return KFoldResults(model, acc, y_pred)
+    return KFoldResults(model, acc, y_pred, val_idx)
 
 
 class ErrorConsistencyBase(ABC):
@@ -342,7 +346,25 @@ class ErrorConsistencyBase(ABC):
             y_pred = model.predict(x_val)
             acc = 1 - np.mean(get_y_error(y_pred, y_val, self.y_sample_dim))
 
-        return KFoldResults(model, acc, y_pred)
+        return KFoldResults(model, acc, y_pred, val_idx)
+
+    def starmap_args(
+        self, repetitions: int, save_fold_accs: bool, seed: Optional[int]
+    ) -> Generator[Tuple[Any, ...], None, None]:
+        rngs = parallel_seed_generators(seed, repetitions)
+        model = self.model_factory.create
+        for i in range(repetitions):
+            yield (
+                self.x,
+                self.y,
+                self.x_sample_dim,
+                self.y_sample_dim,
+                self.n_splits,
+                self.stratify,
+                [model() for _ in range(self.n_splits)],
+                rngs[i],
+                save_fold_accs,
+            )
 
 
 class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
@@ -665,7 +687,6 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
                 rep_pbar.update()
             rep_pbar.close()
         else:
-
             rep_results = process_map(
                 validate_kfold_imap,
                 self.starmap_args(repetitions, save_fold_accs, seed),
@@ -1056,7 +1077,35 @@ class ErrorConsistencyKFoldInternal(ErrorConsistencyBase):
                 rep_pbar.update()
             rep_pbar.close()
         else:
-            raise NotImplementedError()
+            rep_results: List[List[KFoldResults]] = process_map(
+                validate_kfold_imap,
+                # We have `save_fold_accs=True` (repetitions, True, seed) below because we need to
+                # run the predictions to assemble the piecewise predictions, regardless of whether
+                # or not we save the piecewise predictions individually later
+                self.starmap_args(repetitions, True, seed),
+                max_workers=cpu_count(),
+                desc="Repeating k-fold",
+                total=repetitions,
+            )
+            results_list: List[KFoldResults]
+            for results_list in tqdm(rep_results, desc="Saving results", total=repetitions):
+                fold_combined_preds = np.full_like(y_split, -1)
+                for results in results_list:
+                    y_pred = results.prediction
+                    test_idx = results.test_idx
+                    fold_combined_preds[test_idx] = y_pred
+                    if save_fold_accs:
+                        fold_accs.append(results.score)
+                    if save_fold_preds:
+                        fold_predictions.append(y_pred)
+                    if save_fold_models:
+                        fold_models.append(results.fitted_model)
+                y_err = get_y_error(fold_combined_preds, y_split, self.y_sample_dim)
+                acc = 1 - np.mean(y_err)
+                test_predictions.append(fold_combined_preds)
+                test_accs.append(acc)
+                test_errors.append(y_err)
+
         errcon_results = error_consistencies(
             y_preds=test_predictions,
             y_true=y_split,

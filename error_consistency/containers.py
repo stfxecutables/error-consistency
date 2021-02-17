@@ -30,6 +30,7 @@ class KFoldResults:
     fitted_model: Model
     score: Optional[ndarray]
     prediction: ndarray
+    test_idx: ndarray
 
 
 @dataclass(eq=False)
