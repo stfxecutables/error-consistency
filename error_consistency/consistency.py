@@ -662,10 +662,17 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
             y_split = self.y
         if not parallel_reps:
             rep_desc, fold_desc = "K-fold Repetition {}", "Fold {}"
-            rep_pbar = tqdm(total=repetitions, desc=rep_desc.format(0), leave=True)
+            rep_pbar = tqdm(
+                total=repetitions, desc=rep_desc.format(0), leave=True, disable=not show_progress
+            )
             for rep, kfold in enumerate(kfolds):  # we have `repetitions` ("rep") kfold partitions
                 rep_pbar.set_description(rep_desc.format(rep))
-                fold_pbar = tqdm(total=self.n_splits, desc=fold_desc.format(0), leave=False)
+                fold_pbar = tqdm(
+                    total=self.n_splits,
+                    desc=fold_desc.format(0),
+                    leave=False,
+                    disable=not show_progress,
+                )
                 for k, (train_idx, test_idx) in enumerate(kfold.split(idx, y_split)):
                     fold_pbar.set_description(fold_desc.format(k))
                     results = self.validate_fold(train_idx, test_idx, save_fold_accs)
@@ -694,6 +701,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
                 max_workers=cpu_count(),
                 desc="Repeating k-fold",
                 total=repetitions,
+                disable=not show_progress,
             )
 
             y_preds_list = process_map(
@@ -702,10 +710,14 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
                 max_workers=cpu_count(),
                 desc="Computing holdout predictions",
                 total=repetitions,
+                disable=not show_progress,
             )
 
             for results_list, y_preds in tqdm(
-                zip(rep_results, y_preds_list), desc="Saving results", total=repetitions
+                zip(rep_results, y_preds_list),
+                desc="Saving results",
+                total=repetitions,
+                disable=not show_progress,
             ):
                 for results, y_pred in zip(results_list, y_preds):
                     if save_fold_accs:
@@ -729,6 +741,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
             empty_unions=empty_unions,
             loo_parallel=loo_parallel,
             turbo=turbo,
+            log_progress=show_progress,
         )
 
         consistencies, matrix, unpredictables, predictables, loo_consistencies = errcon_results
@@ -1047,11 +1060,18 @@ class ErrorConsistencyKFoldInternal(ErrorConsistencyBase):
             y_split = self.y
         if not parallel_reps:
             rep_desc, fold_desc = "K-fold Repetition {}", "Fold {}"
-            rep_pbar = tqdm(total=repetitions, desc=rep_desc.format(0), leave=True)
+            rep_pbar = tqdm(
+                total=repetitions, desc=rep_desc.format(0), leave=True, disable=not show_progress
+            )
             for rep, kfold in enumerate(kfolds):  # we have `repetitions` ("rep") kfold partitions
                 fold_combined_preds = np.full_like(y_split, -1)
                 rep_pbar.set_description(rep_desc.format(rep))
-                fold_pbar = tqdm(total=self.n_splits, desc=fold_desc.format(0), leave=False)
+                fold_pbar = tqdm(
+                    total=self.n_splits,
+                    desc=fold_desc.format(0),
+                    leave=False,
+                    disable=not show_progress,
+                )
 
                 for k, (train_idx, test_idx) in enumerate(kfold.split(idx, y_split)):
                     fold_pbar.set_description(fold_desc.format(k))
@@ -1088,9 +1108,12 @@ class ErrorConsistencyKFoldInternal(ErrorConsistencyBase):
                 max_workers=cpu_count(),
                 desc="Repeating k-fold",
                 total=repetitions,
+                disable=not show_progress,
             )
             results_list: List[KFoldResults]
-            for results_list in tqdm(rep_results, desc="Saving results", total=repetitions):
+            for results_list in tqdm(
+                rep_results, desc="Saving results", total=repetitions, disable=not show_progress
+            ):
                 fold_combined_preds = np.full_like(y_split, -1)
                 for results in results_list:
                     y_pred = results.prediction
@@ -1115,6 +1138,7 @@ class ErrorConsistencyKFoldInternal(ErrorConsistencyBase):
             empty_unions=self.empty_unions,
             loo_parallel=loo_parallel,
             turbo=turbo,
+            log_progress=show_progress,
         )
         consistencies, matrix, unpredictables, predictables, loo_consistencies = errcon_results
         numerator = np.sum(unpredictables)

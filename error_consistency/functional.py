@@ -142,6 +142,7 @@ def loo_consistencies(
     empty_unions: _UnionHandling = "0",
     parallel: bool = False,
     norm: _Normalization = "",
+    show_progress: bool = True,
 ) -> ndarray:
     L = len(y_errs)
     loo_sets = combinations(y_errs, L - 1)  # leave-one out
@@ -157,6 +158,7 @@ def loo_consistencies(
             chunksize=chunksize,
             desc="Computing leave-one-out error consistencies",
             total=L,
+            disable=not show_progress,
         )
         if empty_unions == "drop":
             consistencies = np.array(list(filter(lambda c: c is None, consistencies)))
@@ -316,7 +318,7 @@ def error_consistencies(
     predictable_set = union(y_errs)
     if log_progress:
         print("Computing Leave-One-Out error consistencies ... ", end="", flush=True)
-    loocs = loo_consistencies(y_errs, empty_unions, loo_parallel)  # type: ignore
+    loocs = loo_consistencies(y_errs, empty_unions, loo_parallel, show_progress=log_progress)  # type: ignore
     if log_progress:
         print("done.")
 
