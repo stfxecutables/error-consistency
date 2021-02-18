@@ -41,7 +41,9 @@ def load_diabetes() -> Tuple[DataFrame, Series]:
 
 
 def load_park() -> Tuple[DataFrame, Series]:
-    return load_df(PARK, PARK_TARGET)
+    x, y = load_df(PARK, PARK_TARGET)
+    x = x.drop(columns="name")
+    return x, y
 
 
 def load_trans() -> Tuple[DataFrame, Series]:

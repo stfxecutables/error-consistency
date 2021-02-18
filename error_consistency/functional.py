@@ -159,10 +159,10 @@ def loo_consistencies(
             total=L,
         )
         if empty_unions == "drop":
-            consistencies = np.array(filter(lambda c: c is None, consistencies))
+            consistencies = np.array(list(filter(lambda c: c is None, consistencies)))
         if empty_unions == "nan":
             consistencies = np.array(
-                map(lambda c: np.nan if c is None else c, consistencies)  # type: ignore
+                list(map(lambda c: np.nan if c is None else c, consistencies))  # type: ignore
             )
     else:
         consistencies = []
