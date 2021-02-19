@@ -24,35 +24,7 @@ from error_consistency.consistency import (
     ErrorConsistencyKFoldHoldout,
     ErrorConsistencyKFoldInternal,
 )
-from tests.loading import load_diabetes, load_park, load_trans, load_SPECT
-
-
-KNN1_ARGS = dict(n_neighbors=1)
-KNN3_ARGS = dict(n_neighbors=3)
-KNN5_ARGS = dict(n_neighbors=5)
-KNN10_ARGS = dict(n_neighbors=10)
-LR_ARGS = dict(solver="liblinear")  # small datasets
-SVC_ARGS = dict()
-RF_ARGS = dict()
-ADA_ARGS = dict()
-
-CLASSIFIERS: Dict[str, Tuple[Type, Dict]] = {
-    "KNN-1": (KNN, KNN1_ARGS),
-    "KNN-3": (KNN, KNN3_ARGS),
-    "KNN-5": (KNN, KNN5_ARGS),
-    "KNN-10": (KNN, KNN10_ARGS),
-    "Logistic Regression": (LR, LR_ARGS),
-    "SVM": (SVC, SVC_ARGS),
-    "Random Forest": (RF, RF_ARGS),
-    "AdaBoosted DTree": (AdaBoost, ADA_ARGS),
-}
-DATA: Dict[str, Tuple[DataFrame, DataFrame]] = {
-    "Diabetes": load_diabetes(),
-    "Parkinsons": load_park(),
-    "Transfusion": load_trans(),
-    "SPECT": load_SPECT(),
-}
-OUTDIR = Path(__file__).resolve().parent / "results"
+from tests.loading import CLASSIFIERS, DATA, OUTDIR
 
 
 def test_classifiers_holdout(capsys: Any) -> None:

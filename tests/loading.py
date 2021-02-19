@@ -7,6 +7,12 @@ import pandas as pd
 import seaborn as sbn
 from numpy import ndarray
 from pandas import DataFrame, Series
+from sklearn.neighbors import KNeighborsClassifier as KNN
+from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression as LR
+from sklearn.ensemble import RandomForestClassifier as RF
+from sklearn.ensemble import AdaBoostClassifier as AdaBoost
+from sklearn.model_selection import train_test_split
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from typing import cast, no_type_check
@@ -54,3 +60,31 @@ def load_SPECT() -> Tuple[DataFrame, Series]:
     x1, y1 = load_df(SPECT_TRAIN, SPECT_TARGET)
     x2, y2 = load_df(SPECT_TEST, SPECT_TARGET)
     return pd.concat([x1, x2], axis=0), pd.concat([y1, y2], axis=0)
+
+
+KNN1_ARGS = dict(n_neighbors=1)
+KNN3_ARGS = dict(n_neighbors=3)
+KNN5_ARGS = dict(n_neighbors=5)
+KNN10_ARGS = dict(n_neighbors=10)
+LR_ARGS = dict(solver="liblinear")  # small datasets
+SVC_ARGS = dict()
+RF_ARGS = dict()
+ADA_ARGS = dict()
+
+CLASSIFIERS: Dict[str, Tuple[Type, Dict]] = {
+    "KNN-1": (KNN, KNN1_ARGS),
+    "KNN-3": (KNN, KNN3_ARGS),
+    "KNN-5": (KNN, KNN5_ARGS),
+    "KNN-10": (KNN, KNN10_ARGS),
+    "Logistic Regression": (LR, LR_ARGS),
+    "SVM": (SVC, SVC_ARGS),
+    "Random Forest": (RF, RF_ARGS),
+    "AdaBoosted DTree": (AdaBoost, ADA_ARGS),
+}
+DATA: Dict[str, Tuple[DataFrame, DataFrame]] = {
+    "Diabetes": load_diabetes(),
+    "Parkinsons": load_park(),
+    "Transfusion": load_trans(),
+    "SPECT": load_SPECT(),
+}
+OUTDIR = Path(__file__).resolve().parent / "results"
