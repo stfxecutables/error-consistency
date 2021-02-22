@@ -87,6 +87,9 @@ def argparse_setup() -> ArgumentParser:
     parser.add_argument("--classifier", choices=CLASSIFIER_CHOICES, required=True)
     parser.add_argument("--dataset", choices=DATASET_CHOICES, required=True)
     parser.add_argument("--pbar", action="store_true")
+    parser.add_argument(
+        "--cpus", type=int, help="number of cpus to use for parallelization", default=4
+    )
     return parser
 
 
@@ -119,6 +122,7 @@ def get_percent_acc_consistency(
     kfold_reps: int,
     x_test: ndarray = None,
     y_test: ndarray = None,
+    cpus: int = 4,
 ) -> Tuple[float, float]:
     x_down, y_down = None, None
     if percent >= 100:
@@ -148,8 +152,8 @@ def get_percent_acc_consistency(
             repetitions=kfold_reps,
             save_test_accs=True,
             save_fold_accs=False,
-            parallel_reps=True,
-            loo_parallel=True,
+            parallel_reps=cpus,
+            loo_parallel=cpus,
             turbo=True,
             show_progress=False,
         )
@@ -167,8 +171,8 @@ def get_percent_acc_consistency(
         repetitions=kfold_reps,
         save_test_accs=True,
         save_fold_accs=False,
-        parallel_reps=True,
-        loo_parallel=True,
+        parallel_reps=cpus,
+        loo_parallel=cpus,
         turbo=True,
         show_progress=False,
     )
@@ -236,6 +240,7 @@ def holdout_downsampling(args: Namespace,) -> None:
     outdir = args.results_dir
     if not outdir.exists():
         os.makedirs(outdir)
+    cpus = args.cpus
 
     x, y = DATA[dataset]
     print(f"Preparing {dataset} data...")
@@ -258,7 +263,7 @@ def holdout_downsampling(args: Namespace,) -> None:
         for r in range(reps_per_percent):
             pbar_reps.set_description(desc_reps.format(r))
             acc, cons = get_percent_acc_consistency(
-                model, model_args, x, y, percent, kfold_reps, x_test, y_test
+                model, model_args, x, y, percent, kfold_reps, x_test, y_test, cpus
             )
             data[row] = [percent, acc, cons]
             row += 1
@@ -280,8 +285,9 @@ def generate_arguments(
     results_dir: Path = RESULTS_DIR,
     kfold_reps: int = KFOLD_REPS,
     percent_reps: int = REPS_PER_PERCENT,
+    cpus: int = 4,
 ) -> str:
-    template = "--classifier={classifier} --dataset={dataset} --kfold-reps={kfold_reps} --percent-reps={percent_reps} --results-dir={results_dir}"
+    template = "--classifier={classifier} --dataset={dataset} --kfold-reps={kfold_reps} --percent-reps={percent_reps} --results-dir={results_dir} --cpus={cpus}"
     lines = []
     for dataset in DATASET_CHOICES:
         for classifier in CLASSIFIER_CHOICES:
@@ -292,6 +298,7 @@ def generate_arguments(
                     kfold_reps=kfold_reps,
                     percent_reps=percent_reps,
                     results_dir=results_dir,
+                    cpus=cpus,
                 )
             )
     return "\n".join(lines)
@@ -301,7 +308,7 @@ if __name__ == "__main__":
     print(generate_arguments(percent_reps=50, kfold_reps=100))
     parser = argparse_setup()
     args = parser.parse_args(
-        "--classifier mlp --dataset diabetes --kfold-reps 100 --percent-reps 50 --results-dir analysis/results/testresults --pbar".split(
+        "--classifier lr --dataset diabetes --kfold-reps 100 --percent-reps 50 --results-dir analysis/results/testresults --pbar --cpus 8".split(
             " "
         )
     )

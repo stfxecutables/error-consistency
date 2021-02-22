@@ -572,8 +572,8 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
         save_fold_models: bool = False,
         empty_unions: UnionHandling = 0,
         show_progress: bool = True,
-        parallel_reps: bool = False,
-        loo_parallel: bool = False,
+        parallel_reps: Union[bool, int] = False,
+        loo_parallel: Union[bool, int] = False,
         turbo: bool = False,
         seed: int = None,
     ) -> ConsistencyResults:
@@ -660,7 +660,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
             y_split = np.argmax(self.y, axis=1 - np.abs(self.y_sample_dim))  # convert to labels
         else:
             y_split = self.y
-        if not parallel_reps:
+        if parallel_reps is False:
             rep_desc, fold_desc = "K-fold Repetition {}", "Fold {}"
             rep_pbar = tqdm(
                 total=repetitions, desc=rep_desc.format(0), leave=True, disable=not show_progress
@@ -695,10 +695,14 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
                 rep_pbar.update()
             rep_pbar.close()
         else:
+            if parallel_reps is True:
+                cpus = cpu_count()
+            else:
+                cpus = parallel_reps
             rep_results = process_map(
                 validate_kfold_imap,
                 self.starmap_args(repetitions, save_fold_accs, seed),
-                max_workers=cpu_count(),
+                max_workers=cpus,
                 desc="Repeating k-fold",
                 total=repetitions,
                 disable=not show_progress,
@@ -707,7 +711,7 @@ class ErrorConsistencyKFoldHoldout(ErrorConsistencyBase):
             y_preds_list = process_map(
                 get_test_predictions,
                 [(rep_result, x_test) for rep_result in rep_results],
-                max_workers=cpu_count(),
+                max_workers=cpus,
                 desc="Computing holdout predictions",
                 total=repetitions,
                 disable=not show_progress,
@@ -981,8 +985,8 @@ class ErrorConsistencyKFoldInternal(ErrorConsistencyBase):
         save_fold_preds: bool = False,
         save_fold_models: bool = False,
         show_progress: bool = True,
-        parallel_reps: bool = False,
-        loo_parallel: bool = False,
+        parallel_reps: Union[bool, int] = False,
+        loo_parallel: Union[bool, int] = False,
         turbo: bool = False,
         seed: int = None,
     ) -> ConsistencyResults:
@@ -1058,7 +1062,7 @@ class ErrorConsistencyKFoldInternal(ErrorConsistencyBase):
             y_split = np.argmax(self.y, axis=1 - np.abs(self.y_sample_dim))  # convert to labels
         else:
             y_split = self.y
-        if not parallel_reps:
+        if parallel_reps is False:
             rep_desc, fold_desc = "K-fold Repetition {}", "Fold {}"
             rep_pbar = tqdm(
                 total=repetitions, desc=rep_desc.format(0), leave=True, disable=not show_progress
@@ -1099,13 +1103,17 @@ class ErrorConsistencyKFoldInternal(ErrorConsistencyBase):
                 rep_pbar.update()
             rep_pbar.close()
         else:
+            if parallel_reps is True:
+                cpus = cpu_count()
+            else:
+                cpus = parallel_reps
             rep_results: List[List[KFoldResults]] = process_map(
                 validate_kfold_imap,
                 # We have `save_fold_accs=True` (repetitions, True, seed) below because we need to
                 # run the predictions to assemble the piecewise predictions, regardless of whether
                 # or not we save the piecewise predictions individually later
                 self.starmap_args(repetitions, True, seed),
-                max_workers=cpu_count(),
+                max_workers=cpus,
                 desc="Repeating k-fold",
                 total=repetitions,
                 disable=not show_progress,
