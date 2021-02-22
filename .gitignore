@@ -1,5 +1,6 @@
 # Error-Consistency Specific Ignores
 .vscode
+**/*results
 
 
 
