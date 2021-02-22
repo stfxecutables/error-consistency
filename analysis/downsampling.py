@@ -315,5 +315,6 @@ if __name__ == "__main__":
     # args = parser.parse_args()
     filterwarnings("ignore", message="Got `batch_size`", category=UserWarning)
     filterwarnings("ignore", message="Stochastic Optimizer")
+    filterwarnings("ignore", message="Liblinear failed to converge")
     holdout_downsampling(args)
 
