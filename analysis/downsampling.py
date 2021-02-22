@@ -54,6 +54,9 @@ from error_consistency.consistency import (
     ErrorConsistencyKFoldInternal,
 )
 
+CLASSIFIER_CHOICES = ["knn1", "knn3", "knn5", "knn10", "lr", "svm", "rf", "ada", "mlp"]
+DATASET_CHOICES = ["diabetes", "park", "trans", "spect"]
+
 
 def argparse_setup() -> ArgumentParser:
     parser = ArgumentParser(description="Plot effect of downsampling on error consistency.")
@@ -81,12 +84,8 @@ def argparse_setup() -> ArgumentParser:
         help="space between percents. E.g.  5 means 5, 10, 15, ...",
         default=5,
     )
-    parser.add_argument(
-        "--classifier",
-        choices=["knn1", "knn3", "knn5", "knn10", "lr", "svm", "rf", "ada", "mlp"],
-        required=True,
-    )
-    parser.add_argument("--dataset", choices=["diabetes", "park", "trans", "spect"], required=True)
+    parser.add_argument("--classifier", choices=CLASSIFIER_CHOICES, required=True)
+    parser.add_argument("--dataset", choices=DATASET_CHOICES, required=True)
     parser.add_argument("--pbar", action="store_true")
     return parser
 
@@ -277,10 +276,32 @@ def holdout_downsampling(args: Namespace,) -> None:
     df.to_json(outfile)
 
 
+def generate_arguments(
+    results_dir: Path = RESULTS_DIR,
+    kfold_reps: int = KFOLD_REPS,
+    percent_reps: int = REPS_PER_PERCENT,
+) -> str:
+    template = "--classifier={classifier} --dataset={dataset} --kfold-reps={kfold_reps} --percent-reps={percent_reps} --results-dir={results_dir}"
+    lines = []
+    for dataset in DATASET_CHOICES:
+        for classifier in CLASSIFIER_CHOICES:
+            lines.append(
+                template.format(
+                    classifier=classifier,
+                    dataset=dataset,
+                    kfold_reps=kfold_reps,
+                    percent_reps=percent_reps,
+                    results_dir=results_dir,
+                )
+            )
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
+    print(generate_arguments(percent_reps=50, kfold_reps=100))
     parser = argparse_setup()
     args = parser.parse_args(
-        "--classifier mlp --dataset diabetes --kfold-reps 1 --percent-reps 1 --results-dir analysis/results/testresults --pbar".split(
+        "--classifier mlp --dataset diabetes --kfold-reps 100 --percent-reps 50 --results-dir analysis/results/testresults --pbar".split(
             " "
         )
     )
