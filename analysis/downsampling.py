@@ -277,6 +277,7 @@ def holdout_downsampling(args: Namespace,) -> None:
         data=data, columns=["Percent", "Accuracy", "Consistency"], index=range(n_rows), dtype=float
     )
     print(df)
+    classifier = classifier.replace(" ", "_")
     outfile = outdir / f"{dataset}_{classifier}__k-fold-holdout_downsample.json"
     df.to_json(outfile)
 
