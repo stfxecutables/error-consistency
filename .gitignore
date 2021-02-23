@@ -1,6 +1,7 @@
 # Error-Consistency Specific Ignores
 .vscode
 **/*results
+tests/datasets/covid-ct
 
 
 
