@@ -20,7 +20,7 @@ RESULTS_DIR = OUTDIR / "dfs"
 
 for dir in [OUTDIR, PLOT_OUTDIR, RESULTS_DIR]:
     if not dir.exists():
-        os.makedirs(dir)
+        os.makedirs(dir, exist_ok=True)
 
 REPS_PER_PERCENT = 50
 KFOLD_REPS = 100

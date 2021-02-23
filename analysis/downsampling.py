@@ -305,14 +305,14 @@ def generate_arguments(
 
 
 if __name__ == "__main__":
-    print(generate_arguments(percent_reps=50, kfold_reps=100))
+    # print(generate_arguments(percent_reps=50, kfold_reps=100))
     parser = argparse_setup()
-    args = parser.parse_args(
-        "--classifier lr --dataset diabetes --kfold-reps 100 --percent-reps 50 --results-dir analysis/results/testresults --pbar --cpus 8".split(
-            " "
-        )
-    )
-    # args = parser.parse_args()
+    args = parser.parse_args()
+    # args = parser.parse_args(
+    #     "--classifier lr --dataset diabetes --kfold-reps 100 --percent-reps 50 --results-dir analysis/results/testresults --pbar --cpus 8".split(
+    #         " "
+    #     )
+    # )
     filterwarnings("ignore", message="Got `batch_size`", category=UserWarning)
     filterwarnings("ignore", message="Stochastic Optimizer")
     filterwarnings("ignore", message="Liblinear failed to converge")
