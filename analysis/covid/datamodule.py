@@ -6,6 +6,7 @@ import numpy as np
 from typing import Any, Callable, Optional, no_type_check
 from torch.utils.data.dataset import Dataset
 from torchvision.transforms import (
+    RandomCrop,
     RandomResizedCrop,
     RandomHorizontalFlip,
     ToTensor,
@@ -14,6 +15,7 @@ from torchvision.transforms import (
     ToPILImage,
 )
 
+from monai.transforms import Rand2DElastic as RandomElastic
 
 from pytorch_lightning import LightningDataModule
 
@@ -85,13 +87,26 @@ class CovidCTDataModule(LightningDataModule):
 
     @staticmethod
     def _get_dataset(subset: str) -> CovidDataset:
+        elastic_args = dict(
+            spacing=0.5,
+            magnitude_range=(0.01, 0.2),
+            prob=1.0,
+            rotate_range=np.pi / 32,  # radians
+            shear_range=0.1,
+            translate_range=(0.4, 0.4),
+            scale_range=(0.2, 0.2),
+            padding_mode="reflection",
+            as_tensor_output=True,
+        )
         transform = (
             Compose(
                 [
                     ToPILImage(),
-                    RandomResizedCrop(RESIZE, scale=(0.5, 1.0)),
+                    RandomCrop(RESIZE),
+                    # RandomResizedCrop(RESIZE, scale=(0.5, 1.0)),
                     RandomHorizontalFlip(),
                     ToTensor(),
+                    RandomElastic(**elastic_args)
                 ]
             )
             if subset == "train"
