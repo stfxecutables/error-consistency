@@ -196,11 +196,11 @@ class CovidLightningEfficientNet(LightningModule):
 
 if __name__ == "__main__":
     torch.cuda.empty_cache()
-
+    LOGDIR = str(Path(__file__).resolve().parent)
     model = CovidLightningEfficientNet()
     dm = CovidCTDataModule(batch_size=40, num_workers=6)
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000, overfit_batches=0.1)
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000)
-    trainer = Trainer(gpus=1, max_epochs=1000)
+    trainer = Trainer(default_save_path=LOGDIR, gpus=1, max_epochs=1000)
     trainer.fit(model, datamodule=dm)
 
