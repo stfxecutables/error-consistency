@@ -97,12 +97,12 @@ class CovidEfficientNet(Module):
         # self.model = EfficientNet.from_pretrained(
         #     "efficientnet-b1", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
         # )
-        # self.model = EfficientNet.from_pretrained(
-        #     "efficientnet-b0", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
-        # )
-        self.model = EfficientNet.from_name(
+        self.model = EfficientNet.from_pretrained(
             "efficientnet-b0", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
         )
+        # self.model = EfficientNet.from_name(
+        #     "efficientnet-b0", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
+        # )
         # in_features = self._get_output_size()
         # self.gap = GlobalAveragePooling(reduction_dim=1, keepdim=True)
         # in_features = self._get_output_size()
@@ -201,6 +201,6 @@ if __name__ == "__main__":
     dm = CovidCTDataModule(batch_size=40, num_workers=6)
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000, overfit_batches=0.1)
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000)
-    trainer = Trainer(default_save_path=LOGDIR, gpus=1, max_epochs=1000)
+    trainer = Trainer(default_root_dir=LOGDIR, gpus=1, max_epochs=3000)
     trainer.fit(model, datamodule=dm)
 
