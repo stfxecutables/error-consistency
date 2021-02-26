@@ -82,8 +82,9 @@ def plot_results(file: Path, df: DataFrame, jitter: bool = True, curve: bool = T
     ax.set_xlim(0, 100)
     ax.set_ylim(0.2, 1)
     fig.set_size_inches(w=6, h=4)
-    pdf = PDF_DIR / f"{file.stem}.pdf"
-    png = PNG_DIR / f"{file.stem}.png"
+    j = "" if jitter else "_no-jitter"
+    pdf = PDF_DIR / f"{file.stem}{j}.pdf"
+    png = PNG_DIR / f"{file.stem}{j}.png"
     fig.savefig(pdf)
     fig.savefig(png, dpi=600)
     plt.close()
@@ -91,4 +92,4 @@ def plot_results(file: Path, df: DataFrame, jitter: bool = True, curve: bool = T
 
 if __name__ == "__main__":
     for file, df in tqdm(zip(JSONS, DFS), total=len(DFS), desc="Plotting"):
-        plot_results(file, df)
+        plot_results(file, df, jitter=False)
