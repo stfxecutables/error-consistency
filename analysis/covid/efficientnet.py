@@ -8,6 +8,7 @@ from torch.optim.optimizer import Optimizer
 from torch.optim import Adam
 from pathlib import Path
 from functools import reduce
+from efficientnet_pytorch import EfficientNet
 
 from torch.nn import (
     Module,
@@ -90,85 +91,42 @@ class ConvUnit(Module):
         return x
 
 
-class CovidCNN(Module):
-    def __init__(
-        self,
-        channels_start: int = 32,
-        depth: int = 4,
-        kernel_size: int = 3,
-        dilation: int = 1,
-        padding: int = 0,
-        padding_mode: str = "reflect",
-    ):
+class CovidEfficientNet(Module):
+    def __init__(self) -> None:
         super().__init__()
-
-        c = channels_start
-        convs = ModuleList()
-        i = 0
-        for i in range(depth):
-            convs.append(
-                ConvUnit(
-                    in_channels=1 if i == 0 else c * (2 ** (i - 1)),
-                    out_channels=c * (2 ** i),
-                    kernel_size=kernel_size,
-                    dilation=dilation,
-                    padding=padding,
-                    padding_mode=padding_mode,
-                )
-            )
-            if i != 0 and i % 2 == 1:
-                convs.append(MaxPool2d(2, 2))
-
-        self.convs = ModuleList(convs)
-        self.flatten = Flatten()
+        # self.model = EfficientNet.from_pretrained(
+        #     "efficientnet-b1", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
+        # )
+        # self.model = EfficientNet.from_pretrained(
+        #     "efficientnet-b0", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
+        # )
+        self.model = EfficientNet.from_name(
+            "efficientnet-b0", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
+        )
         # in_features = self._get_output_size()
-        self.gap = GlobalAveragePooling(reduction_dim=1, keepdim=True)
-        in_features = self._get_output_size()
-        self.linear = Linear(in_features=in_features, out_features=1)
+        # self.gap = GlobalAveragePooling(reduction_dim=1, keepdim=True)
+        # in_features = self._get_output_size()
+        # self.linear = Linear(in_features=in_features, out_features=1)
 
     def forward(self, x: Tensor) -> Tensor:
-        for conv in self.convs:
-            x = conv(x)
-        x = self.gap(x)
-        x = self.flatten(x)
-        return self.linear(x)  # type: ignore
-
-    def _get_output_size(self) -> int:
-        # x = torch.rand([1, 1, *SIZE])
-        x = torch.rand([1, 1, RESIZE, RESIZE])
-        for conv in self.convs:
-            x = conv(x)
-        x = self.gap(x)
-        shape = [*x.shape[1:]]
-        return int(reduce(lambda a, b: a * b, shape, 1))
+        return self.model(x)
 
 
-class CovidLightning(LightningModule):
+class CovidLightningEfficientNet(LightningModule):
     def __init__(
         self,
-        channels_start: int = 32,
-        depth: int = 4,
-        kernel_size: int = 3,
-        dilation: int = 1,
-        padding: int = 0,
-        padding_mode: str = "reflect",
         lr: float = 1e-3,
         weight_decay: float = 1e-4,
+        lr_schedule: bool = False,
         *args: Any,
         **kwargs: Any,
     ):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
-        self.model = CovidCNN(
-            channels_start=channels_start,
-            depth=depth,
-            kernel_size=kernel_size,
-            dilation=dilation,
-            padding=padding,
-            padding_mode=padding_mode,
-        )
+        self.model = CovidEfficientNet()
         self.lr = lr
         self.weight_decay = weight_decay
+        self.lr_schedule = lr_schedule
 
     @no_type_check
     def forward(self, x: Tensor) -> Tensor:
@@ -224,46 +182,22 @@ class CovidLightning(LightningModule):
         self.log("test_acc0.10", acc01)
         self.log("test_acc0.90", acc09)
 
+    @no_type_check
     def configure_optimizers(self) -> Optimizer:
-        return Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-
-
-def test_transform() -> None:
-    from monai.transforms import Rand2DElastic as Elastic
-    import numpy as np
-
-    args = dict(
-        spacing=0.5,
-        magnitude_range=(0.01, 0.2),
-        prob=1.0,
-        rotate_range=np.pi / 32,  # radians
-        shear_range=0.1,
-        translate_range=(0.4, 0.4),
-        scale_range=(0.2, 0.2),
-        padding_mode="reflection",
-    )
-    transform = Elastic(**args)
-    x = np.load("/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_test.npy")[0]
-    x = np.expand_dims(x, 0)
-    fig, axes = plt.subplots(ncols=3, nrows=3)
-    for i in range(9):
-        if i == 4:
-            continue  # center of grid
-        img = transform(x)
-        axes.flat[i].imshow(img.squeeze(), cmap="Greys")
-        # axes.flat[i].set_title("Elastic Deformed")
-    axes.flat[4].imshow(x.squeeze(), cmap="Greys")
-    axes.flat[4].set_title("Original")
-    fig.set_size_inches(w=16, h=18)
-    fig.suptitle(str(args))
-    plt.show()
+        # use the same as
+        # https://github.com/UCSD-AI4H/COVID-CT/blob/0c83254a43230de176489a9b4e3ac12e23b0df53/
+        # baseline%20methods/DenseNet169/DenseNet_predict.py#L554
+        optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        if self.lr_schedule:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+            return [optimizer], [scheduler]
+        return optimizer
 
 
 if __name__ == "__main__":
-    # test_transform()
-    # sys.exit()
     torch.cuda.empty_cache()
-    model = CovidLightning(channels_start=16, depth=4, dilation=1, weight_decay=0.001)
+
+    model = CovidLightningEfficientNet()
     dm = CovidCTDataModule(batch_size=40, num_workers=6)
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000, overfit_batches=0.1)
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000)
