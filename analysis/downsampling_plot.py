@@ -48,12 +48,16 @@ DATASETS = [file.name.split("_")[0] for file in JSONS]
 DFS = [pd.read_json(json) for json in JSONS]
 
 
-def plot_results(file: Path, df: DataFrame, jitter: bool = True, curve: bool = True, show: bool = False) -> None:
+def plot_results(
+    file: Path, df: DataFrame, jitter: bool = True, curve: bool = True, show: bool = False
+) -> None:
     fig: plt.Figure
     ax: plt.Axes
     pieces = file.name.split("_")
-    dataset = pieces[0]
-    classifier = pieces[1]
+    ds = dataset = pieces[0]
+    classifier = file.name[len(ds) + 1 : file.name.find("__")]
+    if classifier == "":
+        return
     sbn.set_style("darkgrid")
     fig, ax = plt.subplots()
     x = df["Percent"].to_numpy().astype(float)
@@ -92,8 +96,9 @@ def plot_results(file: Path, df: DataFrame, jitter: bool = True, curve: bool = T
 
 
 if __name__ == "__main__":
-    # for file, df in tqdm(zip(JSONS, DFS), total=len(DFS), desc="Plotting"):
-    #     plot_results(file, df, jitter=False)
-    FILE = Path("/home/derek/Desktop/error-consistency/analysis/results/testresults/Diabetes_Logistic_Regression__k-fold-holdout_downsample.json")
-    df = pd.read_json(FILE)
-    plot_results(FILE, df, jitter=False, curve=True, show=True)
+    for file, df in tqdm(zip(JSONS, DFS), total=len(DFS), desc="Plotting"):
+        plot_results(file, df, jitter=False)
+    print(f"Saved plots to {PDF_DIR.parent}")
+    # FILE = Path("/home/derek/Desktop/error-consistency/analysis/results/testresults/Diabetes_Logistic_Regression__k-fold-holdout_downsample.json")
+    # df = pd.read_json(FILE)
+    # plot_results(FILE, df, jitter=False, curve=True, show=True)
