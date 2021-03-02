@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from typing import List, Tuple
@@ -8,7 +9,9 @@ from analysis.constants import KFOLD_REPS, N_PERCENTS, RESULTS_DIR
 
 CLASSIFIER_CHOICES = ["knn1", "knn3", "knn5", "knn10", "lr", "svm", "rf", "ada", "mlp"]
 DATASET_CHOICES = ["diabetes", "park", "trans", "spect"]
-SCRIPT_OUTDIR = Path(__file__).resolve().parent.parent
+SCRIPT_OUTDIR = Path(__file__).resolve().parent / "job_scripts"
+if not SCRIPT_OUTDIR.exists():
+    os.makedirs(SCRIPT_OUTDIR, exist_ok=True)
 
 
 def generate_script(
