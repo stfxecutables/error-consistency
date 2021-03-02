@@ -16,16 +16,18 @@ from sklearn.neural_network import MLPClassifier
 
 OUTDIR = Path(__file__).resolve().parent / "results"
 PLOT_OUTDIR = OUTDIR / "plots"
-RESULTS_DIR = OUTDIR / "dfs"
+RESULTS_DIR = Path(__file__).resolve().parent / "results/dfs"
 
 for dir in [OUTDIR, PLOT_OUTDIR, RESULTS_DIR]:
     if not dir.exists():
         os.makedirs(dir, exist_ok=True)
 
 REPS_PER_PERCENT = 50
-KFOLD_REPS = 100
-REPS_PER_PERCENT = 5
+REPS_PER_PERCENT = 10
 KFOLD_REPS = 10
+N_PERCENTS = 150
+PERCENT_MIN = 50
+PERCENT_MAX = 95
 
 PERCENTS = np.linspace(0, 1, 21)[1:-1]  # 5, 10, ..., 95
 COLS = [f"{e:1.0f}" for e in PERCENTS * 100]

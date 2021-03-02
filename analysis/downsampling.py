@@ -28,24 +28,16 @@ from warnings import filterwarnings
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from analysis.constants import (
+    N_PERCENTS,
+    PERCENT_MAX,
+    PERCENT_MIN,
     PLOT_OUTDIR,
-    OUTDIR,
     RESULTS_DIR,
     N_ROWS,
     REPS_PER_PERCENT,
     KFOLD_REPS,
     PERCENTS,
     COLS,
-    DATASET_NAMES,
-    KNN1_ARGS,
-    KNN3_ARGS,
-    KNN5_ARGS,
-    KNN10_ARGS,
-    LR_ARGS,
-    SVC_ARGS,
-    RF_ARGS,
-    ADA_ARGS,
-    MLP_ARGS,
     CLASSIFIERS,
     DATA,
 )
@@ -56,6 +48,7 @@ from error_consistency.consistency import (
 
 CLASSIFIER_CHOICES = ["knn1", "knn3", "knn5", "knn10", "lr", "svm", "rf", "ada", "mlp"]
 DATASET_CHOICES = ["diabetes", "park", "trans", "spect"]
+SCRIPT_OUTDIR = Path(__file__).resolve().parent.parent
 
 
 def argparse_setup() -> ArgumentParser:
@@ -73,17 +66,30 @@ def argparse_setup() -> ArgumentParser:
         "--kfold-reps", type=int, help="times to repeat k-fold per downsampling", default=KFOLD_REPS
     )
     parser.add_argument(
-        "--percent-reps",
+        "--n-percents",
         type=int,
-        help="times to downsample for each percentage",
-        default=REPS_PER_PERCENT,
+        help="times to sample the percentages between --percent-min and --percent-max",
+        default=N_PERCENTS,
     )
     parser.add_argument(
-        "--percent-spacing",
-        type=int,
-        help="space between percents. E.g.  5 means 5, 10, 15, ...",
-        default=5,
+        "--percent-min", type=int, help="smallest percentage to downsample to", default=PERCENT_MIN
     )
+    parser.add_argument(
+        "--percent-max", type=int, help="largest percentage to downsample to", default=PERCENT_MAX
+    )
+
+    # parser.add_argument(
+    #     "--percent-reps",
+    #     type=int,
+    #     help="times to downsample for each percentage",
+    #     default=REPS_PER_PERCENT,
+    # )
+    # parser.add_argument(
+    #     "--percent-spacing",
+    #     type=int,
+    #     help="space between percents. E.g.  5 means 5, 10, 15, ...",
+    #     default=5,
+    # )
     parser.add_argument("--classifier", choices=CLASSIFIER_CHOICES, required=True)
     parser.add_argument("--dataset", choices=DATASET_CHOICES, required=True)
     parser.add_argument("--pbar", action="store_true")
@@ -230,13 +236,15 @@ def holdout_downsampling(args: Namespace,) -> None:
     disable = not args.pbar
     dataset = dataset_from_args(args)
     classifier = classifier_from_args(args)
-    d = float(args.percent_spacing)
-    percents = np.arange(0, 100 + d, d)[1:]
-    percents = percents[percents >= 5]
-    cols = [f"{e:1.0f}" for e in percents]
-    reps_per_percent = args.percent_reps
+    percents = np.sort(np.random.uniform(args.percent_min, args.percent_max, args.n_percents))
+    # d = float(args.percent_spacing)
+    # percents = np.arange(0, 100 + d, d)[1:]
+    # percents = percents[percents >= 5]
+    # cols = [f"{e:1.0f}" for e in percents]
+    # reps_per_percent = args.percent_reps
+    # n_rows = len(percents) * reps_per_percent
     kfold_reps = args.kfold_reps
-    n_rows = len(percents) * reps_per_percent
+    n_rows = len(percents)
     outdir = args.results_dir
     if not outdir.exists():
         os.makedirs(outdir)
@@ -249,26 +257,18 @@ def holdout_downsampling(args: Namespace,) -> None:
     model_args = model_args_dict[dataset]
     print(f"Testing {classifier} classifier on {dataset} data...")
     data = np.full([n_rows, 3], -1, dtype=float)
-    desc_percent = "Downsampling at {}%"
+    desc_percent = "Downsampling at {:.1f}%"
     pbar_percent = tqdm(
-        desc=desc_percent.format(cols[0]), total=len(cols), leave=False, disable=disable
+        desc=desc_percent.format(percents[0]), total=len(percents), leave=False, disable=disable
     )
     row = 0
-    for percent, col in zip(percents, cols):
-        pbar_percent.set_description(desc_percent.format(col))
-        desc_reps = "Repetition {:d}"
-        pbar_reps = tqdm(
-            desc=desc_reps.format(0), total=reps_per_percent, leave=False, disable=disable
+    for i, percent in enumerate(percents):
+        pbar_percent.set_description(desc_percent.format(percent))
+        acc, cons = get_percent_acc_consistency(
+            model, model_args, x, y, percent, kfold_reps, x_test, y_test, cpus
         )
-        for r in range(reps_per_percent):
-            pbar_reps.set_description(desc_reps.format(r))
-            acc, cons = get_percent_acc_consistency(
-                model, model_args, x, y, percent, kfold_reps, x_test, y_test, cpus
-            )
-            data[row] = [percent, acc, cons]
-            row += 1
-            pbar_reps.update()
-        pbar_reps.close()
+        data[row] = [percent, acc, cons]
+        row += 1
         pbar_percent.update()
     pbar_percent.close()
     print("row:", row)
@@ -282,38 +282,97 @@ def holdout_downsampling(args: Namespace,) -> None:
     df.to_json(outfile)
 
 
-def generate_arguments(
+def generate_script(
+    time: str = "08:00:00",
+    mlp_time: str = "4-00:00:00",
+    job_name: str = "downsampling",
+    mlp_job_name: str = "downsampling_mlp",
     results_dir: Path = RESULTS_DIR,
     kfold_reps: int = KFOLD_REPS,
-    percent_reps: int = REPS_PER_PERCENT,
-    cpus: int = 4,
+    n_percents: int = N_PERCENTS,
+    cpus: int = 8,
+    script_outdir: Path = SCRIPT_OUTDIR,
 ) -> str:
-    template = "--classifier={classifier} --dataset={dataset} --kfold-reps={kfold_reps} --percent-reps={percent_reps} --results-dir={results_dir} --cpus={cpus}"
-    lines = []
+    lines: List[str]
+    mlp_lines: List[str]
+    template = '"$PYTHON $PROJECT/analysis/downsampling.py --classifier={classifier} --dataset={dataset} --kfold-reps={kfold_reps} --n-percents={n_percents} --results-dir={results_dir} --cpus={cpus}"'
+    lines, mlp_lines = [], []
     for dataset in DATASET_CHOICES:
         for classifier in CLASSIFIER_CHOICES:
-            lines.append(
+            appender = mlp_lines if classifier == "mlp" else lines
+            appender.append(
                 template.format(
                     classifier=classifier,
                     dataset=dataset,
                     kfold_reps=kfold_reps,
-                    percent_reps=percent_reps,
+                    n_percents=n_percents,
                     results_dir=results_dir,
                     cpus=cpus,
                 )
             )
-    return "\n".join(lines)
+    N = int(len(lines))
+    N_mlp = int(len(mlp_lines))
+    bash_array = "\n".join(lines)
+    bash_array_mlp = "\n".join(mlp_lines)
+    header = """#!/bin/bash
+#SBATCH --account=def-jlevman
+#SBATCH --time={time}
+#SBATCH --job-name={job_name}
+#SBATCH --output={job_name}%A_array%a__%j.out
+#SBATCH --array=0-{N}
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem-per-cpu=8G
+#SBATCH --mail-user=dberger@stfx.ca
+#SBATCH --mail-type=BEGIN
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL"""
+    all_header = header.format(time=time, job_name=job_name, N=N)
+    mlp_header = header.format(time=mlp_time, job_name=mlp_job_name, N=N_mlp)
+
+    script = """
+PROJECT=$HOME/projects/def-jlevman/dberger/error-consistency
+
+module load python/3.8.2
+cd $SLURM_TMPDIR
+tar -xf $PROJECT/venv.tar .venv
+source .venv/bin/activate
+PYTHON=$(which python)
+
+# virtualenv --no-download .venv
+# source .venv/bin/activate
+# pip install --no-index --upgrade pip
+# pip install --no-index -r $PROJECT/requirements.txt
+
+commands=(
+{}
+)
+eval ${{commands["$SLURM_ARRAY_TASK_ID"]}}
+"""
+    all_script = f"{all_header}{script.format(bash_array)}"
+    mlp_script = f"{mlp_header}{script.format(bash_array_mlp)}"
+    with open(SCRIPT_OUTDIR / "submit_all_downsampling.sh", mode="w") as file:
+        file.write(all_script)
+    print(f"Saved downsampling script to {SCRIPT_OUTDIR / 'submit_all_downsampling.sh'}")
+    with open(SCRIPT_OUTDIR / "submit_mlp_downsampling.sh", mode="w") as file:
+        file.write(mlp_script)
+    print(f"Saved mlp downsampling script to {SCRIPT_OUTDIR / 'submit_mlp_downsampling.sh'}")
+
+    return all_script, mlp_script
 
 
 if __name__ == "__main__":
-    # print(generate_arguments(percent_reps=50, kfold_reps=100))
+    scripts = generate_script(kfold_reps=50, n_percents=200, cpus=8)
+    print(scripts[0])
+    print(scripts[1])
+    sys.exit()
     parser = argparse_setup()
-    args = parser.parse_args()
-    # args = parser.parse_args(
-    #     "--classifier lr --dataset diabetes --kfold-reps 100 --percent-reps 50 --results-dir analysis/results/testresults --pbar --cpus 8".split(
-    #         " "
-    #     )
-    # )
+    # args = parser.parse_args()
+    args = parser.parse_args(
+        "--classifier lr --dataset diabetes --kfold-reps 100 --n-percents 200 --results-dir analysis/results/testresults --pbar --cpus 8".split(
+            " "
+        )
+    )
     filterwarnings("ignore", message="Got `batch_size`", category=UserWarning)
     filterwarnings("ignore", message="Stochastic Optimizer")
     filterwarnings("ignore", message="Liblinear failed to converge")

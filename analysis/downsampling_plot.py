@@ -48,7 +48,7 @@ DATASETS = [file.name.split("_")[0] for file in JSONS]
 DFS = [pd.read_json(json) for json in JSONS]
 
 
-def plot_results(file: Path, df: DataFrame, jitter: bool = True, curve: bool = True) -> None:
+def plot_results(file: Path, df: DataFrame, jitter: bool = True, curve: bool = True, show: bool = False) -> None:
     fig: plt.Figure
     ax: plt.Axes
     pieces = file.name.split("_")
@@ -62,7 +62,6 @@ def plot_results(file: Path, df: DataFrame, jitter: bool = True, curve: bool = T
     if jitter:
         d = np.mean(np.diff(np.unique(x)))  # spacing for jitter
         x += np.random.uniform(0, d, len(x))  # x-jitter
-
     if curve:
         ex = df["Percent"].to_numpy()
         acc_smooth = lowess(acc, ex, return_sorted=False)
@@ -75,13 +74,15 @@ def plot_results(file: Path, df: DataFrame, jitter: bool = True, curve: bool = T
     sbn.scatterplot(
         x=x, y=con, color="red", label=None if curve else "Consistency", alpha=0.6, s=3, ax=ax
     )
-
     ax.set_title(f"{dataset} - {classifier}")
     ax.set_xlabel("Downsampling Percentage")
     ax.set_ylabel("Accuracy (or Consistency)")
-    ax.set_xlim(0, 100)
+    ax.set_xlim(50, 100)
     ax.set_ylim(0.2, 1)
     fig.set_size_inches(w=6, h=4)
+    if show:
+        plt.show()
+        return
     j = "" if jitter else "_no-jitter"
     pdf = PDF_DIR / f"{file.stem}{j}.pdf"
     png = PNG_DIR / f"{file.stem}{j}.png"
@@ -91,5 +92,8 @@ def plot_results(file: Path, df: DataFrame, jitter: bool = True, curve: bool = T
 
 
 if __name__ == "__main__":
-    for file, df in tqdm(zip(JSONS, DFS), total=len(DFS), desc="Plotting"):
-        plot_results(file, df, jitter=False)
+    # for file, df in tqdm(zip(JSONS, DFS), total=len(DFS), desc="Plotting"):
+    #     plot_results(file, df, jitter=False)
+    FILE = Path("/home/derek/Desktop/error-consistency/analysis/results/testresults/Diabetes_Logistic_Regression__k-fold-holdout_downsample.json")
+    df = pd.read_json(FILE)
+    plot_results(FILE, df, jitter=False, curve=True, show=True)
