@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+sys.path.append(str(Path(__file__).resolve().parent))
 
 from analysis.constants import KFOLD_REPS, N_PERCENTS, RESULTS_DIR
 
@@ -94,6 +94,7 @@ eval ${{commands["$SLURM_ARRAY_TASK_ID"]}}
 
 
 if __name__ == "__main__":
+    print(f"Will save scripts in {SCRIPT_OUTDIR}")
     scripts = generate_script(kfold_reps=50, n_percents=200, cpus=8)
     print(scripts[0])
     print(scripts[1])
