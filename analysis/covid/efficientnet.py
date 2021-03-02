@@ -1,36 +1,24 @@
-import matplotlib.pyplot as plt
 import sys
-from monai.transforms.spatial.array import Rand2DElastic
-import torch
-from torch import Tensor
-from torch.nn import BCEWithLogitsLoss as Loss
-from torch.optim.optimizer import Optimizer
-from torch.optim import Adam
-from pathlib import Path
+from argparse import ArgumentParser
 from functools import reduce
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union, cast, no_type_check
+
+import matplotlib.pyplot as plt
+import torch
 from efficientnet_pytorch import EfficientNet
-
-from torch.nn import (
-    Module,
-    Conv2d,
-    PReLU,
-    BatchNorm2d,
-    Linear,
-    ModuleList,
-    Flatten,
-    LeakyReLU,
-    MaxPool2d,
-)
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
-from typing import cast, no_type_check
-from typing_extensions import Literal
-
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.metrics.functional import accuracy, auroc, f1
-from typing import no_type_check
+from torch import Tensor
+from torch.nn import BatchNorm2d
+from torch.nn import BCEWithLogitsLoss as Loss
+from torch.nn import Conv2d, Flatten, LeakyReLU, Linear, MaxPool2d, Module, ModuleList, PReLU
+from torch.optim import Adam
+from torch.optim.optimizer import Optimizer
+from typing_extensions import Literal
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-from analysis.covid.datamodule import CovidCTDataModule, RESIZE
+from analysis.covid.datamodule import RESIZE, CovidCTDataModule
 
 SIZE = (256, 256)
 
@@ -193,6 +181,22 @@ class CovidLightningEfficientNet(LightningModule):
             return [optimizer], [scheduler]
         return optimizer
 
+    @staticmethod
+    def add_model_specific_args(parent_parser: ArgumentParser) -> None:
+        # trainer args
+        # model specific args (hparams)
+        parser = ArgumentParser(parents=[parent_parser], add_help=False)
+        parser.add_argument("--version", type=str, choices=[f"b{i}" for i in range(8)])
+        parser.add_argument("--pretrain", action="store_true")  # i.e. do pre-train if flag
+        parser.add_argument("--lr", type=float, default=)  # i.e. do pre-train if flag
+        # program args (paths, e-mails, etc.)
+        pass
+
+def program_level_args() -> ArgumentParser:
+    parser = ArgumentParser()
+    logdir = str(Path(__file__).resolve().parent)
+
+    pass
 
 if __name__ == "__main__":
     torch.cuda.empty_cache()
