@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
-sys.path.append(str(Path(__file__).resolve().parent))
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from analysis.constants import KFOLD_REPS, N_PERCENTS, RESULTS_DIR
 
