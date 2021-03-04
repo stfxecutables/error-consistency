@@ -1,15 +1,15 @@
+from argparse import Namespace
 import torch
-from monai.transforms import Rand2DElastic as Elastic, RandSpatialCrop, RandFlip, Resize
+from monai.transforms import (
+    Rand2DElastic as Elastic,
+    RandSpatialCrop,
+    RandFlip,
+    Resize,
+    RandGaussianNoise,
+)
 import numpy as np
 import matplotlib.pyplot as plt
-from torchvision.transforms import (
-    Compose,
-    ToPILImage,
-    ToTensor,
-    RandomCrop,
-    # RandomHorizontalFlip,
-    # Resize,
-)
+from torchvision.transforms import Compose
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from typing import cast, no_type_check
@@ -38,6 +38,7 @@ ELASTIC_ARGS = dict(
     padding_mode="reflection",
 )
 
+
 class RandomHorizontalFlip:
     def __init__(self, p: float = 0.1, spatial_axis: int = 1) -> None:
         self.p = p
@@ -51,24 +52,24 @@ class RandomHorizontalFlip:
             return x
 
 
-def get_transform(subset: Literal["train", "validation", "val"]) -> Transform:
-    transform = (
-        Compose(
+def get_transform(hparams: Namespace, subset: Literal["train", "validation", "val"]) -> Transform:
+    rcrop = RandSpatialCrop(roi_size=RESIZE, random_center=True, random_size=False)
+    rflip = RandomHorizontalFlip(p=0.3, spatial_axis=-1)
+    noise = RandGaussianNoise(prob=0.2)
+    elast = Elastic(**ELASTIC_ARGS)
+    train_transforms = list(
+        filter(
+            lambda t: t is not None,
             [
-                RandSpatialCrop(roi_size=RESIZE, random_center=True, random_size=False),
-                # RandomCrop(RESIZE),
-                # RandomResizedCrop(RESIZE, scale=(0.5, 1.0)),
-                # RandomHorizontalFlip(),
-                RandomHorizontalFlip(p=0.3, spatial_axis=-1),
-                # ToTensor(),
-                Elastic(**ELASTIC_ARGS),
-            ]
+                rcrop if not hparams.no_rand_crop else None,
+                rflip if not hparams.no_flip else None,
+                noise if hparams.noise else None,
+                elast if not hparams.no_elastic else None,
+            ],
         )
-        if subset == "train"
-        # else Compose([ToPILImage(), Resize(RESIZE), ToTensor()])
-        # else Compose([Resize(spatial_size=[RESIZE, RESIZE]), ToTensor()])
-        else Compose([Resize(spatial_size=[RESIZE, RESIZE])])
     )
+    val_transforms = [Resize(spatial_size=[RESIZE, RESIZE])]
+    transform = Compose(train_transforms) if subset == "train" else Compose(val_transforms)
     return cast(Transform, transform)
 
 

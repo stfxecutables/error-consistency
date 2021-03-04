@@ -10,6 +10,7 @@ import torch
 from efficientnet_pytorch import EfficientNet
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.metrics.functional import accuracy, auroc, f1
+from pytorch_lightning.callbacks import LearningRateMonitor
 from torch import Tensor
 from torch.nn import BatchNorm2d
 from torch.nn import BCEWithLogitsLoss as Loss
@@ -85,7 +86,7 @@ class ConvUnit(Module):
 
 
 class CovidEfficientNet(Module):
-    def __init__(self, hparams: Dict) -> None:
+    def __init__(self, hparams: Namespace) -> None:
         super().__init__()
         # self.model = EfficientNet.from_pretrained(
         #     "efficientnet-b1", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
@@ -106,7 +107,7 @@ class CovidEfficientNet(Module):
         # self.linear = Linear(in_features=in_features, out_features=1)
 
     def forward(self, x: Tensor) -> Tensor:
-        return self.model(x)
+        return self.model(x)  # type: ignore
 
 
 class CovidLightningEfficientNet(LightningModule):
@@ -121,11 +122,11 @@ class CovidLightningEfficientNet(LightningModule):
     ):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
-        self.model = CovidEfficientNet()
+        self.model = CovidEfficientNet(hparams)
         # self.lr = lr
         # self.weight_decay = weight_decay
         # self.lr_schedule = lr_schedule
-        self.lr = hparams.lr
+        self.lr = hparams.initial_lr
         self.weight_decay = hparams.weight_decay
         self.lr_schedule = hparams.lr_schedule
 
@@ -189,8 +190,22 @@ class CovidLightningEfficientNet(LightningModule):
         # https://github.com/UCSD-AI4H/COVID-CT/blob/0c83254a43230de176489a9b4e3ac12e23b0df53/
         # baseline%20methods/DenseNet169/DenseNet_predict.py#L554
         optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        if self.lr_schedule:
+        if self.lr_schedule == "cosine":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+            return [optimizer], [scheduler]
+        elif self.lr_schedule == "cyclic":
+            scheduler = torch.optim.lr_scheduler.CyclicLR(
+                optimizer, base_lr=0.00001, max_lr=0.005, mode="triangular2"
+            )
+            return [optimizer], [scheduler]
+        # as per "Cyclical Learning Rates for Training Neural Networks" arXiv:1506.01186, and
+        # "Super-Convergence: Very Fast Training of NeuralNetworks", arXiv:1708.07120, we do a
+        # linear increase of the learning rate ("learning rate range test, LR range tst") for a
+        # few epochs and note how accuracy changes.
+        elif self.lr_schedule == "linear-test":
+            scheduler = torch.optim.lr_scheduler.LambdaLR(
+                optimizer, lr_lambda=lambda epoch: 0.001 + epoch * 0.001
+            )
             return [optimizer], [scheduler]
         return optimizer
 
@@ -200,11 +215,35 @@ class CovidLightningEfficientNet(LightningModule):
         # model specific args (hparams)
         parser = ArgumentParser(parents=[parent_parser], add_help=False)
         parser.add_argument("--pretrain", action="store_true")  # i.e. do pre-train if flag
-        parser.add_argument("--lr", type=float, default=0.001)
-        parser.add_argument("--weight-decay", type=float, default=0.0001)
-        parser.add_argument("--lr-schedule", default="store_true")
-        # program args (paths, e-mails, etc.)
+        parser.add_argument("--initial-lr", type=float, default=0.001)
+        parser.add_argument("--weight-decay", type=float, default=0.00001)
+        parser.add_argument("--lr-schedule", choices=["cosine", "cyclic", "linear-test"])
+
+        # augmentation params
+        parser.add_argument("--no-elastic", action="store_true")
+        parser.add_argument("--no-rand-crop", action="store_true")
+        parser.add_argument("--no-flip", action="store_true")
+        parser.add_argument("--noise", action="store_true")
         return parser
+
+
+def path_from_hparams(hparams: Namespace) -> str:
+    hp = hparams
+    ver = hp.version
+    pre = "-pretrained" if hp.pretrain else ""
+    lr = f"lr0={hp.initial_lr:1.2e}"
+    wd = f"L2={hp.weight_decay:1.2e}"
+    sched = hp.lr_schedule
+    crop = "crop" if not hp.no_rand_crop else ""
+    flip = "rflip" if not hp.no_flip else ""
+    elas = "elstic" if not hp.no_elastic else ""
+    noise = "noise" if hp.noise else ""
+    augs = f"[{crop}+{flip}+{elas}+{noise}]".replace("++", "+")
+
+    version_dir = Path(__file__).resolve().parent / f"logs/efficientnet-{ver}{pre}"
+    dirname = f"{wd}{sched}{lr}{augs}"
+    log_path = str(version_dir / dirname)
+    return log_path
 
 
 def program_level_parser() -> ArgumentParser:
@@ -217,8 +256,7 @@ def program_level_parser() -> ArgumentParser:
 
 
 def trainer_defaults(hparams: Namespace) -> Dict:
-    version_dir = Path(__file__).resolve().parent / f"logs/efficientnet-{hparams.version}"
-    logdir = str(version_dir / f"{hparams.pretrain}")
+    logdir = path_from_hparams(hparams)
     refresh_rate = 0 if IN_COMPUTE_CANADA_JOB else None
     return dict(default_root_dir=logdir, progress_bar_refresh_rate=refresh_rate, gpus=1)
 
@@ -232,10 +270,11 @@ if __name__ == "__main__":
     hparams = parser.parse_args()
 
     model = CovidLightningEfficientNet(hparams)
-    dm = CovidCTDataModule.from_argparse_args(hparams)
+    dm = CovidCTDataModule(hparams)
     # if you read the source, the **kwargs in Trainer.from_argparse_args just call .update on an
     # args dictionary, so you can override what you want with it
-    trainer = Trainer.from_argparse_args(hparams, **trainer_defaults(hparams))
+    callbacks = [LearningRateMonitor(logging_interval="epoch")]
+    trainer = Trainer.from_argparse_args(hparams, callbacks=callbacks, **trainer_defaults(hparams))
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000, overfit_batches=0.1)
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000)
     # trainer = Trainer(default_root_dir=LOGDIR, gpus=1, max_epochs=3000)

@@ -1,3 +1,4 @@
+from argparse import Namespace
 import sys
 import torch
 from torch import Tensor
@@ -34,10 +35,11 @@ class CovidDataset(Dataset):
 
 
 class CovidCTDataModule(LightningDataModule):
-    def __init__(self, batch_size: int = 32, num_workers: int = 6) -> None:
+    def __init__(self, hparams: Namespace) -> None:
         super().__init__()
-        self.batch_size = batch_size
-        self.num_workers = num_workers
+        self.batch_size = hparams.batch_size
+        self.num_workers = hparams.num_workers
+        self.hparams = hparams
 
     @no_type_check
     def prepare_data(self, *args, **kwargs):
@@ -79,9 +81,8 @@ class CovidCTDataModule(LightningDataModule):
             shuffle=False,
         )
 
-    @staticmethod
-    def _get_dataset(subset: str) -> CovidDataset:
-        transform = get_transform(subset)
+    def _get_dataset(self, subset: str) -> CovidDataset:
+        transform = get_transform(self.hparams, subset)
         x = torch.from_numpy(np.load(DATA / f"x_{subset}.npy")).unsqueeze(1)
         y = torch.from_numpy(np.load(DATA / f"y_{subset}.npy")).unsqueeze(1).float()
         return CovidDataset(x, y, transform)
