@@ -97,6 +97,8 @@ def plot_results(
 
 if __name__ == "__main__":
     for file, df in tqdm(zip(JSONS, DFS), total=len(DFS), desc="Plotting"):
+        if "MLP" not in file.name:
+            continue
         plot_results(file, df, jitter=False)
     print(f"Saved plots to {PDF_DIR.parent}")
     # FILE = Path("/home/derek/Desktop/error-consistency/analysis/results/testresults/Diabetes_Logistic_Regression__k-fold-holdout_downsample.json")

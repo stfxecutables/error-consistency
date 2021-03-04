@@ -1,5 +1,6 @@
+import os
 import sys
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 from functools import reduce
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union, cast, no_type_check
@@ -18,9 +19,13 @@ from torch.optim.optimizer import Optimizer
 from typing_extensions import Literal
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-from analysis.covid.datamodule import RESIZE, CovidCTDataModule
+from analysis.covid.datamodule import CovidCTDataModule
+from analysis.covid.transforms import RESIZE
 
 SIZE = (256, 256)
+
+IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
+ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 
 
 class GlobalAveragePooling(Module):
@@ -80,17 +85,21 @@ class ConvUnit(Module):
 
 
 class CovidEfficientNet(Module):
-    def __init__(self) -> None:
+    def __init__(self, hparams: Dict) -> None:
         super().__init__()
         # self.model = EfficientNet.from_pretrained(
         #     "efficientnet-b1", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
         # )
-        self.model = EfficientNet.from_pretrained(
-            "efficientnet-b0", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
-        )
-        # self.model = EfficientNet.from_name(
-        #     "efficientnet-b0", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
-        # )
+
+        version = hparams.version
+        if hparams.pretrain is True:
+            self.model = EfficientNet.from_pretrained(
+                f"efficientnet-{version}", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
+            )
+        else:
+            self.model = EfficientNet.from_name(
+                f"efficientnet-{version}", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
+            )
         # in_features = self._get_output_size()
         # self.gap = GlobalAveragePooling(reduction_dim=1, keepdim=True)
         # in_features = self._get_output_size()
@@ -103,18 +112,22 @@ class CovidEfficientNet(Module):
 class CovidLightningEfficientNet(LightningModule):
     def __init__(
         self,
-        lr: float = 1e-3,
-        weight_decay: float = 1e-4,
-        lr_schedule: bool = False,
+        hparams: Namespace,
+        # lr: float = 1e-3,
+        # weight_decay: float = 1e-4,
+        # lr_schedule: bool = False,
         *args: Any,
         **kwargs: Any,
     ):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
         self.model = CovidEfficientNet()
-        self.lr = lr
-        self.weight_decay = weight_decay
-        self.lr_schedule = lr_schedule
+        # self.lr = lr
+        # self.weight_decay = weight_decay
+        # self.lr_schedule = lr_schedule
+        self.lr = hparams.lr
+        self.weight_decay = hparams.weight_decay
+        self.lr_schedule = hparams.lr_schedule
 
     @no_type_check
     def forward(self, x: Tensor) -> Tensor:
@@ -182,29 +195,49 @@ class CovidLightningEfficientNet(LightningModule):
         return optimizer
 
     @staticmethod
-    def add_model_specific_args(parent_parser: ArgumentParser) -> None:
+    def add_model_specific_args(parent_parser: ArgumentParser) -> ArgumentParser:
         # trainer args
         # model specific args (hparams)
         parser = ArgumentParser(parents=[parent_parser], add_help=False)
-        parser.add_argument("--version", type=str, choices=[f"b{i}" for i in range(8)])
         parser.add_argument("--pretrain", action="store_true")  # i.e. do pre-train if flag
-        parser.add_argument("--lr", type=float, default=)  # i.e. do pre-train if flag
+        parser.add_argument("--lr", type=float, default=0.001)
+        parser.add_argument("--weight-decay", type=float, default=0.0001)
+        parser.add_argument("--lr-schedule", default="store_true")
         # program args (paths, e-mails, etc.)
-        pass
+        return parser
 
-def program_level_args() -> ArgumentParser:
+
+def program_level_parser() -> ArgumentParser:
     parser = ArgumentParser()
-    logdir = str(Path(__file__).resolve().parent)
+    parser.add_argument("--version", type=str, choices=[f"b{i}" for i in range(8)], default="b0")
+    parser.add_argument("--batch-size", type=int, default=40)
+    parser.add_argument("--num-workers", type=int, default=6)
 
-    pass
+    return parser
+
+
+def trainer_defaults(hparams: Namespace) -> Dict:
+    version_dir = Path(__file__).resolve().parent / f"logs/efficientnet-{hparams.version}"
+    logdir = str(version_dir / f"{hparams.pretrain}")
+    refresh_rate = 0 if IN_COMPUTE_CANADA_JOB else None
+    return dict(default_root_dir=logdir, progress_bar_refresh_rate=refresh_rate, gpus=1)
+
 
 if __name__ == "__main__":
     torch.cuda.empty_cache()
-    LOGDIR = str(Path(__file__).resolve().parent)
-    model = CovidLightningEfficientNet()
-    dm = CovidCTDataModule(batch_size=40, num_workers=6)
+    parser = program_level_parser()
+    parser = CovidLightningEfficientNet.add_model_specific_args(parser)
+    # line below lets
+    parser = Trainer.add_argparse_args(parser)
+    hparams = parser.parse_args()
+
+    model = CovidLightningEfficientNet(hparams)
+    dm = CovidCTDataModule.from_argparse_args(hparams)
+    # if you read the source, the **kwargs in Trainer.from_argparse_args just call .update on an
+    # args dictionary, so you can override what you want with it
+    trainer = Trainer.from_argparse_args(hparams, **trainer_defaults(hparams))
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000, overfit_batches=0.1)
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000)
-    trainer = Trainer(default_root_dir=LOGDIR, gpus=1, max_epochs=3000)
+    # trainer = Trainer(default_root_dir=LOGDIR, gpus=1, max_epochs=3000)
     trainer.fit(model, datamodule=dm)
 

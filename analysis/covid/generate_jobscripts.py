@@ -1,3 +1,6 @@
+from argparse import ArgumentParser
+
+
 SCRIPT = """#!/bin/bash
 #SBATCH --account=def-jlevman
 #SBATCH --time=1-00:00:00  # [dd]-[hh]:[mm]:[ss]
@@ -57,5 +60,8 @@ python $PROJECT/analysis/covid/efficientnet.py
 echo "Training finished at $(date)."
 """
 
+def script_from_args() -> str:
+    parser = ArgumentParser()
+    parser.add_argument()
 
 if __name__ == "__main__":

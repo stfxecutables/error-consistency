@@ -1,3 +1,4 @@
+import sys
 import torch
 from torch import Tensor
 import pytorch_lightning as pl
@@ -5,15 +6,6 @@ from pathlib import Path
 import numpy as np
 from typing import Any, Callable, Optional, no_type_check
 from torch.utils.data.dataset import Dataset
-from torchvision.transforms import (
-    RandomCrop,
-    RandomResizedCrop,
-    RandomHorizontalFlip,
-    ToTensor,
-    Compose,
-    Resize,
-    ToPILImage,
-)
 
 from monai.transforms import Rand2DElastic as RandomElastic
 
@@ -21,8 +13,10 @@ from pytorch_lightning import LightningDataModule
 
 from torch.utils.data import DataLoader, TensorDataset
 
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from analysis.covid.transforms import get_transform
+
 DATA = Path(__file__).resolve().parent.parent.parent / "tests/datasets/covid-ct"
-RESIZE = 224
 
 
 class CovidDataset(Dataset):
@@ -87,31 +81,7 @@ class CovidCTDataModule(LightningDataModule):
 
     @staticmethod
     def _get_dataset(subset: str) -> CovidDataset:
-        elastic_args = dict(
-            spacing=0.5,
-            magnitude_range=(0.01, 0.2),
-            prob=1.0,
-            rotate_range=np.pi / 32,  # radians
-            shear_range=0.1,
-            translate_range=(0.4, 0.4),
-            scale_range=(0.2, 0.2),
-            padding_mode="reflection",
-            as_tensor_output=True,
-        )
-        transform = (
-            Compose(
-                [
-                    ToPILImage(),
-                    RandomCrop(RESIZE),
-                    # RandomResizedCrop(RESIZE, scale=(0.5, 1.0)),
-                    RandomHorizontalFlip(),
-                    ToTensor(),
-                    RandomElastic(**elastic_args)
-                ]
-            )
-            if subset == "train"
-            else Compose([ToPILImage(), Resize(RESIZE), ToTensor()])
-        )
+        transform = get_transform(subset)
         x = torch.from_numpy(np.load(DATA / f"x_{subset}.npy")).unsqueeze(1)
         y = torch.from_numpy(np.load(DATA / f"y_{subset}.npy")).unsqueeze(1).float()
         return CovidDataset(x, y, transform)

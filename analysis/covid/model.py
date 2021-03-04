@@ -228,40 +228,7 @@ class CovidLightning(LightningModule):
         return Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
 
-def test_transform() -> None:
-    from monai.transforms import Rand2DElastic as Elastic
-    import numpy as np
-
-    args = dict(
-        spacing=0.5,
-        magnitude_range=(0.01, 0.2),
-        prob=1.0,
-        rotate_range=np.pi / 32,  # radians
-        shear_range=0.1,
-        translate_range=(0.4, 0.4),
-        scale_range=(0.2, 0.2),
-        padding_mode="reflection",
-    )
-    transform = Elastic(**args)
-    x = np.load("/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_test.npy")[0]
-    x = np.expand_dims(x, 0)
-    fig, axes = plt.subplots(ncols=3, nrows=3)
-    for i in range(9):
-        if i == 4:
-            continue  # center of grid
-        img = transform(x)
-        axes.flat[i].imshow(img.squeeze(), cmap="Greys")
-        # axes.flat[i].set_title("Elastic Deformed")
-    axes.flat[4].imshow(x.squeeze(), cmap="Greys")
-    axes.flat[4].set_title("Original")
-    fig.set_size_inches(w=16, h=18)
-    fig.suptitle(str(args))
-    plt.show()
-
-
 if __name__ == "__main__":
-    # test_transform()
-    # sys.exit()
     torch.cuda.empty_cache()
     model = CovidLightning(channels_start=16, depth=4, dilation=1, weight_decay=0.001)
     dm = CovidCTDataModule(batch_size=40, num_workers=6)

@@ -92,6 +92,7 @@ def argparse_setup() -> ArgumentParser:
     # )
     parser.add_argument("--classifier", choices=CLASSIFIER_CHOICES, required=True)
     parser.add_argument("--dataset", choices=DATASET_CHOICES, required=True)
+    parser.add_argument("--validation", choices=["internal", "external"], default="external")
     parser.add_argument("--pbar", action="store_true")
     parser.add_argument(
         "--cpus", type=int, help="number of cpus to use for parallelization", default=4
@@ -252,7 +253,10 @@ def holdout_downsampling(args: Namespace,) -> None:
 
     x, y = DATA[dataset]
     print(f"Preparing {dataset} data...")
-    x, x_test, y, y_test = train_test_split(x, y, test_size=0.2)
+    if args.validation == "external":
+        x, x_test, y, y_test = train_test_split(x, y, test_size=0.2)
+    else:
+        x_test = y_test = None
     model, model_args_dict = CLASSIFIERS[classifier]
     model_args = model_args_dict[dataset]
     print(f"Testing {classifier} classifier on {dataset} data...")
@@ -278,18 +282,19 @@ def holdout_downsampling(args: Namespace,) -> None:
     )
     print(df)
     classifier = classifier.replace(" ", "_")
-    outfile = outdir / f"{dataset}_{classifier}__k-fold-holdout_downsample.json"
+    val = "holdout" if args.validation == "external" else "internal"
+    outfile = outdir / f"{dataset}_{classifier}__k-fold-{val}.json"
     df.to_json(outfile)
 
 
 if __name__ == "__main__":
     parser = argparse_setup()
-    args = parser.parse_args()
-    # args = parser.parse_args(
-    #     "--classifier lr --dataset diabetes --kfold-reps 100 --n-percents 200 --results-dir analysis/results/testresults --pbar --cpus 8".split(
-    #         " "
-    #     )
-    # )
+    # args = parser.parse_args()
+    args = parser.parse_args(
+        "--classifier lr --dataset diabetes --kfold-reps 10 --n-percents 50 --results-dir analysis/results/testresults --pbar --cpus 8 --validation internal".split(
+            " "
+        )
+    )
     filterwarnings("ignore", message="Got `batch_size`", category=UserWarning)
     filterwarnings("ignore", message="Stochastic Optimizer")
     filterwarnings("ignore", message="Liblinear failed to converge")
