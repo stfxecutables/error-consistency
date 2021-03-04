@@ -123,6 +123,7 @@ class CovidLightningEfficientNet(LightningModule):
         # self.lr = lr
         # self.weight_decay = weight_decay
         # self.lr_schedule = lr_schedule
+        self.params = hparams
         self.lr = hparams.initial_lr
         self.weight_decay = hparams.weight_decay
         self.lr_schedule = hparams.lr_schedule
@@ -191,6 +192,14 @@ class CovidLightningEfficientNet(LightningModule):
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
             return [optimizer], [scheduler]
         elif self.lr_schedule == "cyclic":
+            base_lr = 0.00001
+            max_lr = 1e-3
+            if self.params.version == "b1":
+                if self.params.pretrain:
+                    pass
+                else:
+                    base_lr = 0.001
+
             scheduler = torch.optim.lr_scheduler.CyclicLR(
                 optimizer, base_lr=0.00001, max_lr=0.005, mode="triangular2"
             )
@@ -201,7 +210,8 @@ class CovidLightningEfficientNet(LightningModule):
         # few epochs and note how accuracy changes.
         elif self.lr_schedule == "linear-test":
             scheduler = torch.optim.lr_scheduler.LambdaLR(
-                optimizer, lr_lambda=lambda epoch: 0.001 + epoch * 0.001
+                # will get up to learning rate of 1 in 200 epochs, 2 in 400, etc.
+                optimizer, lr_lambda=lambda epoch: 0.0001 + epoch * 0.005
             )
             return [optimizer], [scheduler]
         return optimizer
