@@ -51,6 +51,7 @@ TEMPLATE = """#!/bin/bash
 #SBATCH --mail-type=FAIL
 
 PROJECT=$HOME/projects/def-jlevman/dberger/error-consistency
+LOGS=$PROJECT/analysis/covid/logs
 
 module load python/3.8.2
 cd $SLUM_TMPDIR
@@ -58,7 +59,8 @@ tar -xf $PROJECT/venv.tar .venv
 source .venv/bin/activate
 # PYTHON=$(which python)
 
-echo "Starting training efficientnet-{version} with args {args} at $(date)." && \\
+echo "Starting training efficientnet-{version} with args {args} at $(date)."
+tensorboard --logdir=$LOGS --host 0.0.0.0 &
 python $PROJECT/analysis/covid/efficientnet.py {args} && \\
 echo "Finished training efficientnet-{version} with args {args} at $(date)."
 """
