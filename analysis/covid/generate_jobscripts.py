@@ -113,7 +113,7 @@ def script_from_args() -> str:
     script = TEMPLATE.format(version=version, args=" ".join(sys.argv[1:]))
     with open(script_path, "w") as file:
         file.writelines(script)
-    print(f"Saved job submission script to {script_path.relative_to(Path.home())}")
+    print(f"Saved job submission script to {script_path}")
 
 
 if __name__ == "__main__":
