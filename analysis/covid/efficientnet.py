@@ -1,23 +1,20 @@
 import os
 import sys
 from argparse import ArgumentParser, Namespace
-from functools import reduce
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union, cast, no_type_check
+from typing import Any, Dict, Tuple, no_type_check
 
-import matplotlib.pyplot as plt
 import torch
 from efficientnet_pytorch import EfficientNet
 from pytorch_lightning import LightningModule, Trainer
-from pytorch_lightning.metrics.functional import accuracy, auroc, f1
 from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.metrics.functional import accuracy
 from torch import Tensor
 from torch.nn import BatchNorm2d
 from torch.nn import BCEWithLogitsLoss as Loss
-from torch.nn import Conv2d, Flatten, LeakyReLU, Linear, MaxPool2d, Module, ModuleList, PReLU
+from torch.nn import Conv2d, LeakyReLU, Module
 from torch.optim import Adam
 from torch.optim.optimizer import Optimizer
-from typing_extensions import Literal
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from analysis.covid.datamodule import CovidCTDataModule
@@ -281,4 +278,3 @@ if __name__ == "__main__":
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000)
     # trainer = Trainer(default_root_dir=LOGDIR, gpus=1, max_epochs=3000)
     trainer.fit(model, datamodule=dm)
-

@@ -1,18 +1,14 @@
-from argparse import Namespace
 import sys
-import torch
-from torch import Tensor
-import pytorch_lightning as pl
+from argparse import Namespace
 from pathlib import Path
+from typing import Any, Callable, no_type_check
+
 import numpy as np
-from typing import Any, Callable, Optional, no_type_check
-from torch.utils.data.dataset import Dataset
-
-from monai.transforms import Rand2DElastic as RandomElastic
-
+import torch
 from pytorch_lightning import LightningDataModule
-
+from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data.dataset import Dataset
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from analysis.covid.transforms import get_transform
@@ -86,4 +82,3 @@ class CovidCTDataModule(LightningDataModule):
         x = torch.from_numpy(np.load(DATA / f"x_{subset}.npy")).unsqueeze(1)
         y = torch.from_numpy(np.load(DATA / f"y_{subset}.npy")).unsqueeze(1).float()
         return CovidDataset(x, y, transform)
-
