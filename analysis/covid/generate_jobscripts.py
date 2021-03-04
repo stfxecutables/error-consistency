@@ -71,21 +71,29 @@ if not SCRIPTS_DIR.exists():
 
 
 def scriptname_from_args(args: Namespace) -> str:
+    # model
     hp = args
     ver = hp.version
     pre = "-pretrained" if hp.pretrain else ""
+
+    # learning rate-related
     lr = f"lr0={hp.initial_lr:1.2e}"
-    wd = f"L2={hp.weight_decay:1.2e}"
     sched = hp.lr_schedule
+    if sched == "linear-test":
+        sched = str(sched).upper()
+    wd = f"L2={hp.weight_decay:1.2e}"
+    b = hp.batch_size
+
+    # augments
     crop = "crop" if not hp.no_rand_crop else ""
     flip = "rflip" if not hp.no_flip else ""
     elas = "elstic" if not hp.no_elastic else ""
     noise = "noise" if hp.noise else ""
-    augs = f"[{crop}+{flip}+{elas}+{noise}]".replace("++", "+")
+    augs = f"{crop}+{flip}+{elas}+{noise}".replace("++", "+")
     if augs[-1] == "+":
         augs = augs[:-1]
 
-    scriptname = f"submit__eff-net-{ver}{pre}_{wd}{sched}{lr}{augs}.sh"
+    scriptname = f"submit__eff-net-{ver}{pre}_{sched}_{lr}_{wd}_{b}_batch_{augs}.sh"
     return scriptname
 
 

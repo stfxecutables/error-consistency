@@ -27,7 +27,8 @@ ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 
 # max_lr as determined by the LR range test (https://arxiv.org/pdf/1708.07120.pdf)
 # note these were tested with a batch size of 40 and various regularization params
-MAX_LRS: Dict[str, float] = {"b0": 3e-3, "b1": 5e-3, "b0-pretrain": 1, "b1-pretrain": 5e-4}
+# for lr range test really don't want learning rate to grow beyond 1, or even really 0.5 I think
+MAX_LRS: Dict[str, float] = {"b0": 3e-3, "b1": 5e-3, "b0-pretrain": 5e-3, "b1-pretrain": 5e-4}
 
 
 class GlobalAveragePooling(Module):
@@ -260,19 +261,26 @@ def path_from_hparams(hparams: Namespace) -> str:
     hp = hparams
     ver = hp.version
     pre = "-pretrained" if hp.pretrain else ""
+
+    # learning rate-related
+    sched = hp.lr_schedule
+    if sched == "linear-test":
+        sched = str(sched).upper()
     lr = f"lr0={hp.initial_lr:1.2e}"
     wd = f"L2={hp.weight_decay:1.2e}"
-    sched = hp.lr_schedule
+    b = hp.batch_size
+
+    # augments
     crop = "crop" if not hp.no_rand_crop else ""
     flip = "rflip" if not hp.no_flip else ""
     elas = "elstic" if not hp.no_elastic else ""
     noise = "noise" if hp.noise else ""
-    augs = f"[{crop}+{flip}+{elas}+{noise}]".replace("++", "+")
+    augs = f"{crop}+{flip}+{elas}+{noise}".replace("++", "+")
     if augs[-1] == "+":
         augs = augs[:-1]
 
     version_dir = Path(__file__).resolve().parent / f"logs/efficientnet-{ver}{pre}"
-    dirname = f"{wd}{sched}{lr}{augs}"
+    dirname = f"_{sched}_{lr}_{wd}_{b}batch_{augs}"
     log_path = str(version_dir / dirname)
     return log_path
 
