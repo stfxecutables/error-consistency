@@ -25,6 +25,10 @@ SIZE = (256, 256)
 IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
 ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 
+# max_lr as determined by the LR range test (https://arxiv.org/pdf/1708.07120.pdf)
+# note these were tested with a batch size of 40 and various regularization params
+MAX_LRS: Dict[str, float] = {"b0": 3e-3, "b1": 5e-3, "b0-pretrain": 1, "b1-pretrain": 5e-4}
+
 
 class GlobalAveragePooling(Module):
     """Apply the mean along a dimension.
@@ -192,16 +196,31 @@ class CovidLightningEfficientNet(LightningModule):
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
             return [optimizer], [scheduler]
         elif self.lr_schedule == "cyclic":
-            base_lr = 0.00001
-            max_lr = 1e-3
+            max_lr = 1e-1
             if self.params.version == "b1":
                 if self.params.pretrain:
                     pass
                 else:
-                    base_lr = 0.001
+                    max_lr = 1e-2
+
+            base_lr = max_lr / 3.5
 
             scheduler = torch.optim.lr_scheduler.CyclicLR(
-                optimizer, base_lr=0.00001, max_lr=0.005, mode="triangular2"
+                optimizer, base_lr=base_lr, max_lr=max_lr, mode="triangular2"
+            )
+            return [optimizer], [scheduler]
+        elif self.lr_schedule == "one-cycle":
+            max_lr = 1e-1
+            if self.params.version == "b1":
+                if self.params.pretrain:
+                    pass
+                else:
+                    max_lr = 1e-2
+
+            base_lr = max_lr / 3.5
+
+            scheduler = torch.optim.lr_scheduler.CyclicLR(
+                optimizer, base_lr=base_lr, max_lr=max_lr, mode="triangular2"
             )
             return [optimizer], [scheduler]
         # as per "Cyclical Learning Rates for Training Neural Networks" arXiv:1506.01186, and
@@ -211,7 +230,10 @@ class CovidLightningEfficientNet(LightningModule):
         elif self.lr_schedule == "linear-test":
             scheduler = torch.optim.lr_scheduler.LambdaLR(
                 # will get up to learning rate of 1 in 200 epochs, 2 in 400, etc.
-                optimizer, lr_lambda=lambda epoch: 0.0001 + epoch * 0.005
+                # since the result of the lambda is multiplied by the initial lr,
+                # we can make this insensitive to the initial lr by division
+                optimizer,
+                lr_lambda=lambda epoch: (0.0001 + epoch * 0.005) / self.lr,
             )
             return [optimizer], [scheduler]
         return optimizer
@@ -267,7 +289,13 @@ def program_level_parser() -> ArgumentParser:
 def trainer_defaults(hparams: Namespace) -> Dict:
     logdir = path_from_hparams(hparams)
     refresh_rate = 0 if IN_COMPUTE_CANADA_JOB else None
-    return dict(default_root_dir=logdir, progress_bar_refresh_rate=refresh_rate, gpus=1)
+    max_epochs = 1000 if hparams.lr_schedule == "linear-test" else 4000
+    return dict(
+        default_root_dir=logdir,
+        progress_bar_refresh_rate=refresh_rate,
+        gpus=1,
+        max_epochs=max_epochs,
+    )
 
 
 if __name__ == "__main__":
