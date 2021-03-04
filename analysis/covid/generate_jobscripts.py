@@ -77,10 +77,12 @@ def scriptname_from_args(args: Namespace) -> str:
     pre = "-pretrained" if hp.pretrain else ""
 
     # learning rate-related
-    lr = f"lr0={hp.initial_lr:1.2e}"
     sched = hp.lr_schedule
-    if sched == "linear-test":
+    is_range_test = sched == "linear-test"
+    lr = f"lr0={hp.initial_lr:1.2e}"
+    if is_range_test:
         sched = str(sched).upper()
+        lr = f"lr-max={hp.lrtest_max}@{hp.lrtest_epochs_to_max}"
     wd = f"L2={hp.weight_decay:1.2e}"
     b = hp.batch_size
 
@@ -93,7 +95,7 @@ def scriptname_from_args(args: Namespace) -> str:
     if augs[-1] == "+":
         augs = augs[:-1]
 
-    scriptname = f"submit__eff-net-{ver}{pre}_{sched}_{lr}_{wd}_{b}_batch_{augs}.sh"
+    scriptname = f"submit__eff-net-{ver}{pre}_{sched}_{lr}_{wd}_{b}batch_{augs}.sh"
     return scriptname
 
 
@@ -110,6 +112,9 @@ def script_from_args() -> str:
     parser.add_argument("--initial-lr", type=float, default=0.001)
     parser.add_argument("--weight-decay", type=float, default=0.00001)
     parser.add_argument("--lr-schedule", choices=["cosine", "cyclic", "linear-test"])
+    parser.add_argument("--lrtest-min", type=float, default=1e-6)
+    parser.add_argument("--lrtest-max", type=float, default=1.0)
+    parser.add_argument("--lrtest-epochs-to-max", type=float, default=800)
 
     # augmentation params
     parser.add_argument("--no-elastic", action="store_true")

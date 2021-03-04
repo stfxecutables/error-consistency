@@ -229,12 +229,13 @@ class CovidLightningEfficientNet(LightningModule):
         # linear increase of the learning rate ("learning rate range test, LR range tst") for a
         # few epochs and note how accuracy changes.
         elif self.lr_schedule == "linear-test":
+            lr_min = self.params.lrtest_min
+            lr_max = self.params.lrtest_max
+            n_epochs = self.params.lrtest_epochs_to_max
+            lr_step = lr_max / n_epochs
             scheduler = torch.optim.lr_scheduler.LambdaLR(
-                # will get up to learning rate of 1 in 200 epochs, 2 in 400, etc.
-                # since the result of the lambda is multiplied by the initial lr,
-                # we can make this insensitive to the initial lr by division
                 optimizer,
-                lr_lambda=lambda epoch: (0.0001 + epoch * 0.005) / self.lr,
+                lr_lambda=lambda epoch: (lr_min + epoch * lr_step) / self.lr,
             )
             return [optimizer], [scheduler]
         return optimizer
@@ -248,6 +249,9 @@ class CovidLightningEfficientNet(LightningModule):
         parser.add_argument("--initial-lr", type=float, default=0.001)
         parser.add_argument("--weight-decay", type=float, default=0.00001)
         parser.add_argument("--lr-schedule", choices=["cosine", "cyclic", "linear-test"])
+        parser.add_argument("--lrtest-min", type=float, default=1e-6)
+        parser.add_argument("--lrtest-max", type=float, default=1.0)
+        parser.add_argument("--lrtest-epochs-to-max", type=float, default=800)
 
         # augmentation params
         parser.add_argument("--no-elastic", action="store_true")
@@ -264,9 +268,11 @@ def path_from_hparams(hparams: Namespace) -> str:
 
     # learning rate-related
     sched = hp.lr_schedule
-    if sched == "linear-test":
-        sched = str(sched).upper()
+    is_range_test = sched == "linear-test"
     lr = f"lr0={hp.initial_lr:1.2e}"
+    if is_range_test:
+        sched = str(sched).upper()
+        lr = f"lr-max={hp.lrtest_max}@{hp.lrtest_epochs_to_max}"
     wd = f"L2={hp.weight_decay:1.2e}"
     b = hp.batch_size
 
