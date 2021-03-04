@@ -239,6 +239,8 @@ def path_from_hparams(hparams: Namespace) -> str:
     elas = "elstic" if not hp.no_elastic else ""
     noise = "noise" if hp.noise else ""
     augs = f"[{crop}+{flip}+{elas}+{noise}]".replace("++", "+")
+    if augs[-1] == "+":
+        augs = augs[:-1]
 
     version_dir = Path(__file__).resolve().parent / f"logs/efficientnet-{ver}{pre}"
     dirname = f"{wd}{sched}{lr}{augs}"
