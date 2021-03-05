@@ -250,7 +250,7 @@ class CovidLightningEfficientNet(LightningModule):
         parser.add_argument("--lr-schedule", choices=["cosine", "cyclic", "linear-test"])
         parser.add_argument("--lrtest-min", type=float, default=1e-6)
         parser.add_argument("--lrtest-max", type=float, default=0.05)
-        parser.add_argument("--lrtest-epochs-to-max", type=float, default=800)
+        parser.add_argument("--lrtest-epochs-to-max", type=float, default=1500)
 
         # augmentation params
         parser.add_argument("--no-elastic", action="store_true")
