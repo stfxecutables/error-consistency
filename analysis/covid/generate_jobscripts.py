@@ -107,6 +107,7 @@ def script_from_args() -> str:
     parser.add_argument("--version", type=str, choices=[f"b{i}" for i in range(8)], default="b0")
     parser.add_argument("--batch-size", type=int, default=40)
     parser.add_argument("--num-workers", type=int, default=6)
+    parser.add_argument("--max-epochs", type=int, default=5000)
 
     # model-specific args
     parser.add_argument("--pretrain", action="store_true")  # i.e. do pre-train if flag
