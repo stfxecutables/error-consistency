@@ -8,12 +8,12 @@ import torch
 from efficientnet_pytorch import EfficientNet
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.callbacks import LearningRateMonitor
-from pytorch_lightning.metrics.functional import accuracy
+from pytorch_lightning.metrics.functional import accuracy, auroc, f1
 from torch import Tensor
 from torch.nn import BatchNorm2d
 from torch.nn import BCEWithLogitsLoss as Loss
 from torch.nn import Conv2d, LeakyReLU, Module
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 from torch.optim.optimizer import Optimizer
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
@@ -189,20 +189,23 @@ class CovidLightningEfficientNet(LightningModule):
         # use the same as
         # https://github.com/UCSD-AI4H/COVID-CT/blob/0c83254a43230de176489a9b4e3ac12e23b0df53/
         # baseline%20methods/DenseNet169/DenseNet_predict.py#L554
-        optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         if self.lr_schedule == "cosine":
+            optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
             return [optimizer], [scheduler]
         elif self.lr_schedule == "cyclic":
+            optimizer = SGD(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
             lr_key = f"{self.params.version}{'-pretrain' if self.params.pretrain else ''}"
             max_lr = MAX_LRS[lr_key]
             base_lr = max_lr / 3.5
 
             scheduler = torch.optim.lr_scheduler.CyclicLR(
-                optimizer, base_lr=base_lr, max_lr=max_lr, mode="triangular2"
+                optimizer, base_lr=base_lr, max_lr=max_lr, mode="triangular2", step_size_up=200
             )
+            scheduler = {"scheduler": scheduler, "interval": "step"}
             return [optimizer], [scheduler]
         elif self.lr_schedule == "one-cycle":
+            optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
             lr_key = f"{self.params.version}{'-pretrain' if self.params.pretrain else ''}"
             max_lr = MAX_LRS[lr_key]
             base_lr = max_lr / 3.5
@@ -212,6 +215,7 @@ class CovidLightningEfficientNet(LightningModule):
                 max_lr=max_lr,
                 total_steps=None,
                 epochs=self.params.max_epochs,
+                pct_start=0.3,  # don't need the learning rate to be large for too long
                 # below needs to be len(train_loader...) // batch_size
                 # we also add 1 because there is clearly an implementation bug somewhere
                 # https://discuss.pytorch.org/t/lr-scheduler-onecyclelr-causing-tried-to-step-57082-times-the-specified-number-of-total-steps-is-57080/90083/5
@@ -228,6 +232,7 @@ class CovidLightningEfficientNet(LightningModule):
         # linear increase of the learning rate ("learning rate range test, LR range tst") for a
         # few epochs and note how accuracy changes.
         elif self.lr_schedule == "linear-test":
+            optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
             lr_min = self.params.lrtest_min
             lr_max = self.params.lrtest_max
             n_epochs = self.params.lrtest_epochs_to_max
@@ -236,7 +241,9 @@ class CovidLightningEfficientNet(LightningModule):
                 optimizer, lr_lambda=lambda epoch: (lr_min + epoch * lr_step) / self.lr
             )
             return [optimizer], [scheduler]
-        return optimizer
+        else:
+            optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+            return optimizer
 
     @staticmethod
     def add_model_specific_args(parent_parser: ArgumentParser) -> ArgumentParser:
@@ -247,7 +254,8 @@ class CovidLightningEfficientNet(LightningModule):
         parser.add_argument("--initial-lr", type=float, default=0.001)
         parser.add_argument("--weight-decay", type=float, default=0.00001)
         parser.add_argument(
-            "--lr-schedule", choices=["cosine", "cyclic", "linear-test", "one-cycle"]
+            "--lr-schedule",
+            choices=["cosine", "cyclic", "linear-test", "one-cycle", "none", "None"],
         )
         parser.add_argument("--lrtest-min", type=float, default=1e-6)
         parser.add_argument("--lrtest-max", type=float, default=0.05)
@@ -333,3 +341,8 @@ if __name__ == "__main__":
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000)
     # trainer = Trainer(default_root_dir=LOGDIR, gpus=1, max_epochs=3000)
     trainer.fit(model, datamodule=dm)
+    results = trainer.test(model, datamodule=dm)
+    # we don't really need to print because tensorboard logs the test result
+    for key, val in results[0].items():
+        print(f"{key:>12}: {val:1.4f}")
+

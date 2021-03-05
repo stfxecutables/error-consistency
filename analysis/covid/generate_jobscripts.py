@@ -113,7 +113,9 @@ def script_from_args() -> str:
     parser.add_argument("--pretrain", action="store_true")  # i.e. do pre-train if flag
     parser.add_argument("--initial-lr", type=float, default=0.001)
     parser.add_argument("--weight-decay", type=float, default=0.00001)
-    parser.add_argument("--lr-schedule", choices=["cosine", "cyclic", "linear-test", "one-cycle"])
+    parser.add_argument(
+        "--lr-schedule", choices=["cosine", "cyclic", "linear-test", "one-cycle", "none", "None"]
+    )
     parser.add_argument("--lrtest-min", type=float, default=1e-6)
     parser.add_argument("--lrtest-max", type=float, default=0.05)
     parser.add_argument("--lrtest-epochs-to-max", type=float, default=1500)
