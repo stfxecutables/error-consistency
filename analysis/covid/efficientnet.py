@@ -26,9 +26,17 @@ IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
 ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 
 # max_lr as determined by the LR range test (https://arxiv.org/pdf/1708.07120.pdf)
-# note these were tested with a batch size of 40 and various regularization params
-# for lr range test really don't want learning rate to grow beyond 1, or even really 0.5 I think
-MAX_LRS: Dict[str, float] = {"b0": 3e-3, "b1": 5e-3, "b0-pretrain": 5e-3, "b1-pretrain": 5e-4}
+# note these were tested with a batch size of 128 and various regularization params:
+#
+# efficientnet-bX-pretrained/_LINEAR-TEST_lr-max=0.05@1500_L2=1.00e-05_128batch_crop+rflip+elstic
+# fmt: off
+MAX_LRS: Dict[str, float] = {
+    "b0": 0.05,
+    "b1": 0.05,
+    "b0-pretrain": 0.03,
+    "b1-pretrain": 0.03,
+}
+# fmt: on
 
 
 class GlobalAveragePooling(Module):
