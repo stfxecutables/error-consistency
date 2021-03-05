@@ -234,8 +234,7 @@ class CovidLightningEfficientNet(LightningModule):
             n_epochs = self.params.lrtest_epochs_to_max
             lr_step = lr_max / n_epochs
             scheduler = torch.optim.lr_scheduler.LambdaLR(
-                optimizer,
-                lr_lambda=lambda epoch: (lr_min + epoch * lr_step) / self.lr,
+                optimizer, lr_lambda=lambda epoch: (lr_min + epoch * lr_step) / self.lr
             )
             return [optimizer], [scheduler]
         return optimizer
@@ -250,7 +249,7 @@ class CovidLightningEfficientNet(LightningModule):
         parser.add_argument("--weight-decay", type=float, default=0.00001)
         parser.add_argument("--lr-schedule", choices=["cosine", "cyclic", "linear-test"])
         parser.add_argument("--lrtest-min", type=float, default=1e-6)
-        parser.add_argument("--lrtest-max", type=float, default=1.0)
+        parser.add_argument("--lrtest-max", type=float, default=0.05)
         parser.add_argument("--lrtest-epochs-to-max", type=float, default=800)
 
         # augmentation params

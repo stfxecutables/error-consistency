@@ -38,7 +38,7 @@ VERSION = "v0"
 TEMPLATE = """#!/bin/bash
 #SBATCH --account=def-jlevman
 #SBATCH --time=1-00:00:00  # [dd]-[hh]:[mm]:[ss]
-#SBATCH --job-name=efficientnet_{version}
+#SBATCH --job-name=effnet_{version}
 #SBATCH --output=eff{version}%A_array%a__%j.out
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=6
@@ -113,7 +113,7 @@ def script_from_args() -> str:
     parser.add_argument("--weight-decay", type=float, default=0.00001)
     parser.add_argument("--lr-schedule", choices=["cosine", "cyclic", "linear-test"])
     parser.add_argument("--lrtest-min", type=float, default=1e-6)
-    parser.add_argument("--lrtest-max", type=float, default=1.0)
+    parser.add_argument("--lrtest-max", type=float, default=0.05)
     parser.add_argument("--lrtest-epochs-to-max", type=float, default=800)
 
     # augmentation params
