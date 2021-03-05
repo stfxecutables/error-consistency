@@ -302,7 +302,7 @@ def program_level_parser() -> ArgumentParser:
 def trainer_defaults(hparams: Namespace) -> Dict:
     logdir = path_from_hparams(hparams)
     refresh_rate = 0 if IN_COMPUTE_CANADA_JOB else None
-    max_epochs = 1000 if hparams.lr_schedule == "linear-test" else 4000
+    max_epochs = 2000 if hparams.lr_schedule == "linear-test" else 5000
     return dict(
         default_root_dir=logdir,
         progress_bar_refresh_rate=refresh_rate,
