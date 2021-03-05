@@ -1,4 +1,4 @@
 tensorboard\
-    --logdir lightning_logs\
+    --logdir analysis/covid/logs\
     --reload_interval 30
 
