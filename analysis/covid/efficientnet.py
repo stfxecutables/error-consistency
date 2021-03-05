@@ -17,7 +17,7 @@ from torch.optim import Adam
 from torch.optim.optimizer import Optimizer
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-from analysis.covid.datamodule import CovidCTDataModule
+from analysis.covid.datamodule import CovidCTDataModule, trainloader_length
 from analysis.covid.transforms import RESIZE
 
 SIZE = (256, 256)
@@ -121,21 +121,10 @@ class CovidEfficientNet(Module):
 
 
 class CovidLightningEfficientNet(LightningModule):
-    def __init__(
-        self,
-        hparams: Namespace,
-        # lr: float = 1e-3,
-        # weight_decay: float = 1e-4,
-        # lr_schedule: bool = False,
-        *args: Any,
-        **kwargs: Any,
-    ):
+    def __init__(self, hparams: Namespace, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
         self.model = CovidEfficientNet(hparams)
-        # self.lr = lr
-        # self.weight_decay = weight_decay
-        # self.lr_schedule = lr_schedule
         self.params = hparams
         self.lr = hparams.initial_lr
         self.weight_decay = hparams.weight_decay
@@ -205,13 +194,8 @@ class CovidLightningEfficientNet(LightningModule):
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
             return [optimizer], [scheduler]
         elif self.lr_schedule == "cyclic":
-            max_lr = 1e-1
-            if self.params.version == "b1":
-                if self.params.pretrain:
-                    pass
-                else:
-                    max_lr = 1e-2
-
+            lr_key = f"{self.params.version}{'-pretrain' if self.params.pretrain else ''}"
+            max_lr = MAX_LRS[lr_key]
             base_lr = max_lr / 3.5
 
             scheduler = torch.optim.lr_scheduler.CyclicLR(
@@ -219,18 +203,25 @@ class CovidLightningEfficientNet(LightningModule):
             )
             return [optimizer], [scheduler]
         elif self.lr_schedule == "one-cycle":
-            max_lr = 1e-1
-            if self.params.version == "b1":
-                if self.params.pretrain:
-                    pass
-                else:
-                    max_lr = 1e-2
-
+            lr_key = f"{self.params.version}{'-pretrain' if self.params.pretrain else ''}"
+            max_lr = MAX_LRS[lr_key]
             base_lr = max_lr / 3.5
-
-            scheduler = torch.optim.lr_scheduler.CyclicLR(
-                optimizer, base_lr=base_lr, max_lr=max_lr, mode="triangular2"
+            steps = trainloader_length(self.params.batch_size)
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=max_lr,
+                total_steps=None,
+                epochs=self.params.max_epochs,
+                # below needs to be len(train_loader...) // batch_size
+                # we also add 1 because there is clearly an implementation bug somewhere
+                # https://discuss.pytorch.org/t/lr-scheduler-onecyclelr-causing-tried-to-step-57082-times-the-specified-number-of-total-steps-is-57080/90083/5
+                # or https://forums.pytorchlightning.ai/t/lr-scheduler-onecyclelr-valueerror-tried-to-step-x-2-times-the-specified-number-of-total-steps-is-x/259/3
+                steps_per_epoch=steps + 1,  # lightning bug
             )
+            # to understand below, see
+            # https://github.com/PyTorchLightning/pytorch-lightning/issues/1120#issuecomment-598331924
+            # we need to ensure `scheduler.step()` is called after each batch
+            scheduler = {"scheduler": scheduler, "interval": "step"}
             return [optimizer], [scheduler]
         # as per "Cyclical Learning Rates for Training Neural Networks" arXiv:1506.01186, and
         # "Super-Convergence: Very Fast Training of NeuralNetworks", arXiv:1708.07120, we do a
@@ -255,7 +246,9 @@ class CovidLightningEfficientNet(LightningModule):
         parser.add_argument("--pretrain", action="store_true")  # i.e. do pre-train if flag
         parser.add_argument("--initial-lr", type=float, default=0.001)
         parser.add_argument("--weight-decay", type=float, default=0.00001)
-        parser.add_argument("--lr-schedule", choices=["cosine", "cyclic", "linear-test"])
+        parser.add_argument(
+            "--lr-schedule", choices=["cosine", "cyclic", "linear-test", "one-cycle"]
+        )
         parser.add_argument("--lrtest-min", type=float, default=1e-6)
         parser.add_argument("--lrtest-max", type=float, default=0.05)
         parser.add_argument("--lrtest-epochs-to-max", type=float, default=1500)
@@ -282,6 +275,7 @@ def path_from_hparams(hparams: Namespace) -> str:
         lr = f"lr-max={hp.lrtest_max}@{hp.lrtest_epochs_to_max}"
     wd = f"L2={hp.weight_decay:1.2e}"
     b = hp.batch_size
+    e = hp.max_epochs
 
     # augments
     crop = "crop" if not hp.no_rand_crop else ""
@@ -292,8 +286,8 @@ def path_from_hparams(hparams: Namespace) -> str:
     if augs[-1] == "+":
         augs = augs[:-1]
 
-    version_dir = Path(__file__).resolve().parent / f"logs/efficientnet-{ver}{pre}"
-    dirname = f"_{sched}_{lr}_{wd}_{b}batch_{augs}"
+    version_dir = Path(__file__).resolve().parent / f"logs/efficientnet-{ver}{pre}/{sched}"
+    dirname = f"{lr}_{wd}_{b}batch_{e}ep_{augs}"
     log_path = str(version_dir / dirname)
     return log_path
 
@@ -303,6 +297,7 @@ def program_level_parser() -> ArgumentParser:
     parser.add_argument("--version", type=str, choices=[f"b{i}" for i in range(8)], default="b0")
     parser.add_argument("--batch-size", type=int, default=40)
     parser.add_argument("--num-workers", type=int, default=6)
+    parser.add_argument("--max-epochs", type=int, default=5000)
 
     return parser
 
@@ -310,7 +305,8 @@ def program_level_parser() -> ArgumentParser:
 def trainer_defaults(hparams: Namespace) -> Dict:
     logdir = path_from_hparams(hparams)
     refresh_rate = 0 if IN_COMPUTE_CANADA_JOB else None
-    max_epochs = 2000 if hparams.lr_schedule == "linear-test" else 5000
+
+    max_epochs = 2000 if hparams.lr_schedule == "linear-test" else hparams.max_epochs
     return dict(
         default_root_dir=logdir,
         progress_bar_refresh_rate=refresh_rate,
@@ -327,8 +323,8 @@ if __name__ == "__main__":
     parser = Trainer.add_argparse_args(parser)
     hparams = parser.parse_args()
 
-    model = CovidLightningEfficientNet(hparams)
     dm = CovidCTDataModule(hparams)
+    model = CovidLightningEfficientNet(hparams)
     # if you read the source, the **kwargs in Trainer.from_argparse_args just call .update on an
     # args dictionary, so you can override what you want with it
     callbacks = [LearningRateMonitor(logging_interval="epoch")]

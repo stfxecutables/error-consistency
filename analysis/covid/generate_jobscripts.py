@@ -85,6 +85,7 @@ def scriptname_from_args(args: Namespace) -> str:
         lr = f"lr-max={hp.lrtest_max}@{hp.lrtest_epochs_to_max}"
     wd = f"L2={hp.weight_decay:1.2e}"
     b = hp.batch_size
+    e = hp.max_epochs
 
     # augments
     crop = "crop" if not hp.no_rand_crop else ""
@@ -95,7 +96,7 @@ def scriptname_from_args(args: Namespace) -> str:
     if augs[-1] == "+":
         augs = augs[:-1]
 
-    scriptname = f"submit__eff-net-{ver}{pre}_{sched}_{lr}_{wd}_{b}batch_{augs}.sh"
+    scriptname = f"submit__eff-net-{ver}{pre}_{sched}_{lr}_{wd}_{b}batch_{e}ep_{augs}.sh"
     return scriptname
 
 
@@ -111,7 +112,7 @@ def script_from_args() -> str:
     parser.add_argument("--pretrain", action="store_true")  # i.e. do pre-train if flag
     parser.add_argument("--initial-lr", type=float, default=0.001)
     parser.add_argument("--weight-decay", type=float, default=0.00001)
-    parser.add_argument("--lr-schedule", choices=["cosine", "cyclic", "linear-test"])
+    parser.add_argument("--lr-schedule", choices=["cosine", "cyclic", "linear-test", "one-cycle"])
     parser.add_argument("--lrtest-min", type=float, default=1e-6)
     parser.add_argument("--lrtest-max", type=float, default=0.05)
     parser.add_argument("--lrtest-epochs-to-max", type=float, default=1500)
