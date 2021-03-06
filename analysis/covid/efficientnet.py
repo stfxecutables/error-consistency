@@ -31,10 +31,10 @@ ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 # efficientnet-bX-pretrained/_LINEAR-TEST_lr-max=0.05@1500_L2=1.00e-05_128batch_crop+rflip+elstic
 # fmt: off
 MAX_LRS: Dict[str, float] = {
-    "b0": 0.05,
-    "b1": 0.05,
-    "b0-pretrain": 0.03,
-    "b1-pretrain": 0.03,
+    "b0": 0.02,
+    "b1": 0.02,
+    "b0-pretrain": 0.01,
+    "b1-pretrain": 0.01,
 }
 # fmt: on
 
@@ -215,7 +215,7 @@ class CovidLightningEfficientNet(LightningModule):
                 max_lr=max_lr,
                 total_steps=None,
                 epochs=self.params.max_epochs,
-                pct_start=0.3,  # don't need the learning rate to be large for too long
+                pct_start=0.05,  # don't need the learning rate to be large for too long
                 # below needs to be len(train_loader...) // batch_size
                 # we also add 1 because there is clearly an implementation bug somewhere
                 # https://discuss.pytorch.org/t/lr-scheduler-onecyclelr-causing-tried-to-step-57082-times-the-specified-number-of-total-steps-is-57080/90083/5
