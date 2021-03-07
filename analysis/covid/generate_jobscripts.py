@@ -78,6 +78,8 @@ def scriptname_from_args(args: Namespace) -> str:
 
     # learning rate-related
     sched = hp.lr_schedule
+    if sched == "one-cycle":
+        sched += hp.onecycle_pct
     is_range_test = sched == "linear-test"
     lr = f"lr0={hp.initial_lr:1.2e}"
     if is_range_test:
@@ -116,6 +118,7 @@ def script_from_args() -> str:
     parser.add_argument(
         "--lr-schedule", choices=["cosine", "cyclic", "linear-test", "one-cycle", "none", "None"]
     )
+    parser.add_argument("--onecycle-pct", type=float, default=0.05)
     parser.add_argument("--lrtest-min", type=float, default=1e-6)
     parser.add_argument("--lrtest-max", type=float, default=0.05)
     parser.add_argument("--lrtest-epochs-to-max", type=float, default=1500)

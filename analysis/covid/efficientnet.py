@@ -215,7 +215,7 @@ class CovidLightningEfficientNet(LightningModule):
                 max_lr=max_lr,
                 total_steps=None,
                 epochs=self.params.max_epochs,
-                pct_start=0.05,  # don't need the learning rate to be large for too long
+                pct_start=self.params.onecycle_pct,  # don't need the learning rate to be large for too long
                 # below needs to be len(train_loader...) // batch_size
                 # we also add 1 because there is clearly an implementation bug somewhere
                 # https://discuss.pytorch.org/t/lr-scheduler-onecyclelr-causing-tried-to-step-57082-times-the-specified-number-of-total-steps-is-57080/90083/5
@@ -257,6 +257,7 @@ class CovidLightningEfficientNet(LightningModule):
             "--lr-schedule",
             choices=["cosine", "cyclic", "linear-test", "one-cycle", "none", "None"],
         )
+        parser.add_argument("--onecycle-pct", type=float, default=0.05)
         parser.add_argument("--lrtest-min", type=float, default=1e-6)
         parser.add_argument("--lrtest-max", type=float, default=0.05)
         parser.add_argument("--lrtest-epochs-to-max", type=float, default=1500)
@@ -276,6 +277,8 @@ def path_from_hparams(hparams: Namespace) -> str:
 
     # learning rate-related
     sched = hp.lr_schedule
+    if sched == "one-cycle":
+        sched += hp.onecycle_pct
     is_range_test = sched == "linear-test"
     lr = f"lr0={hp.initial_lr:1.2e}"
     if is_range_test:
