@@ -1,5 +1,5 @@
 from argparse import Namespace
-from typing import Callable, cast
+from typing import Callable, cast, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -38,8 +38,12 @@ class RandomHorizontalFlip:
             return x
 
 
-def get_transform(hparams: Namespace, subset: Literal["train", "validation", "val"]) -> Transform:
+def get_transform(
+    hparams: Namespace, subset: Literal["train", "validation", "val"]
+) -> Optional[Transform]:
     rcrop = RandSpatialCrop(roi_size=RESIZE, random_center=True, random_size=False)
+    if hparams.no_rand_crop and subset in ["validation", "val"]:
+        return None
     rflip = RandomHorizontalFlip(p=0.3, spatial_axis=-1)
     noise = RandGaussianNoise(prob=0.2)
     elast = Elastic(**ELASTIC_ARGS)
@@ -82,7 +86,7 @@ def test_elastic() -> None:
 
 
 def test_total() -> None:
-    transform = get_transform("train")
+    transform = get_transform("train")  # type: ignore
     data = np.load("/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_test.npy")
     idx = np.random.randint(0, len(data))
     x = np.load("/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_test.npy")[idx]

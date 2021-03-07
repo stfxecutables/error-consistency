@@ -1,7 +1,7 @@
 import sys
 from argparse import Namespace
 from pathlib import Path
-from typing import Any, Callable, no_type_check
+from typing import Any, Callable, no_type_check, Optional
 
 import numpy as np
 import torch
@@ -17,13 +17,15 @@ DATA = Path(__file__).resolve().parent.parent.parent / "tests/datasets/covid-ct"
 
 
 class CovidDataset(Dataset):
-    def __init__(self, x: Tensor, y: Tensor, transform: Callable) -> None:
+    def __init__(self, x: Tensor, y: Tensor, transform: Optional[Callable]) -> None:
         super().__init__()
         self.dataset = TensorDataset(x, y)
         self.transform = transform
 
     def __getitem__(self, index: int) -> Tensor:
         x, y = self.dataset[index]
+        if self.transform is None:
+            return x, y
         return self.transform(x), y
 
     def __len__(self) -> int:
