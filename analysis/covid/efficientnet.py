@@ -278,7 +278,7 @@ def path_from_hparams(hparams: Namespace) -> str:
     # learning rate-related
     sched = hp.lr_schedule
     if sched == "one-cycle":
-        sched += hp.onecycle_pct
+        sched = f"{sched}{hp.onecycle_pct:1.2f}"
     is_range_test = sched == "linear-test"
     lr = f"lr0={hp.initial_lr:1.2e}"
     if is_range_test:
