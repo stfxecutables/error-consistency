@@ -1,6 +1,5 @@
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
-from typing_extensions import Literal
 
 
 class EfficientNetArgs:
@@ -40,7 +39,7 @@ class EfficientNetArgs:
         return parser
 
     @staticmethod
-    def info_from_args(args: Namespace, info: Literal["logpath", "scriptname"]) -> str:
+    def info_from_args(args: Namespace, info: str) -> str:
         hp = args
         ver = hp.version
         pre = "-pretrained" if hp.pretrain else ""
