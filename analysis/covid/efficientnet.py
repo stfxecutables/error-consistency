@@ -32,10 +32,16 @@ ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 # efficientnet-bX-pretrained/_LINEAR-TEST_lr-max=0.05@1500_L2=1.00e-05_128batch_crop+rflip+elstic
 # fmt: off
 MAX_LRS: Dict[str, float] = {
-    "b0": 0.02,
-    "b1": 0.02,
+    "b0": 0.01,
+    "b1": 0.01,
     "b0-pretrain": 0.01,
     "b1-pretrain": 0.01,
+}
+MIN_LRS: Dict[str, float] = {
+    "b0": 1e-5,
+    "b1": 1e-5,
+    "b0-pretrain": 1e-6,
+    "b1-pretrain": 1e-6,
 }
 # fmt: on
 
@@ -196,12 +202,14 @@ class CovidLightningEfficientNet(LightningModule):
             return [optimizer], [scheduler]
         elif self.lr_schedule == "cyclic":
             optimizer = SGD(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+            steps_per_epoch = trainloader_length(self.params.batch_size)
+            stepsize_up = 10 * steps_per_epoch
             lr_key = f"{self.params.version}{'-pretrain' if self.params.pretrain else ''}"
             max_lr = MAX_LRS[lr_key]
-            base_lr = max_lr / 3.5
+            base_lr = MIN_LRS[lr_key]
 
             scheduler = torch.optim.lr_scheduler.CyclicLR(
-                optimizer, base_lr=base_lr, max_lr=max_lr, mode="triangular2", step_size_up=200
+                optimizer, base_lr=base_lr, max_lr=max_lr, mode="triangular2", step_size_up=stepsize_up
             )
             scheduler = {"scheduler": scheduler, "interval": "step"}
             return [optimizer], [scheduler]

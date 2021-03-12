@@ -87,6 +87,7 @@ class CovidCTDataModule(LightningDataModule):
 
 
 def trainloader_length(batch_size: int) -> int:
+    """Return the number of steps in an epoch"""
     n_samples = torch.from_numpy(np.load(DATA / f"x_train.npy")).unsqueeze(1).shape[0]
     return n_samples // batch_size
 

@@ -72,8 +72,8 @@ if not SCRIPTS_DIR.exists():
     os.makedirs(SCRIPTS_DIR, exist_ok=True)
 
 
-def script_from_args() -> str:
-    parser = EfficientNetArgs.program_level_args()
+def script_from_args() -> None:
+    parser = EfficientNetArgs.program_level_parser()
     parser = EfficientNetArgs.add_model_specific_args(parser)
     args = parser.parse_args()
     script_path = SCRIPTS_DIR / EfficientNetArgs.info_from_args(args, info="scriptname")

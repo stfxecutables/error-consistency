@@ -5,10 +5,12 @@ from typing_extensions import Literal
 
 class EfficientNetArgs:
     @staticmethod
-    def program_level_args() -> ArgumentParser:
+    def program_level_parser() -> ArgumentParser:
         parser = ArgumentParser()
         # program args
-        parser.add_argument("--version", type=str, choices=[f"b{i}" for i in range(8)], default="b0")
+        parser.add_argument(
+            "--version", type=str, choices=[f"b{i}" for i in range(8)], default="b0"
+        )
         parser.add_argument("--batch-size", type=int, default=40)
         parser.add_argument("--num-workers", type=int, default=6)
         parser.add_argument("--max-epochs", type=int, default=5000)
@@ -22,7 +24,8 @@ class EfficientNetArgs:
         parser.add_argument("--initial-lr", type=float, default=0.001)
         parser.add_argument("--weight-decay", type=float, default=0.00001)
         parser.add_argument(
-            "--lr-schedule", choices=["cosine", "cyclic", "linear-test", "one-cycle", "none", "None"]
+            "--lr-schedule",
+            choices=["cosine", "cyclic", "linear-test", "one-cycle", "none", "None"],
         )
         parser.add_argument("--onecycle-pct", type=float, default=0.05)
         parser.add_argument("--lrtest-min", type=float, default=1e-6)
