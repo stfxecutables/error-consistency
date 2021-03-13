@@ -208,7 +208,9 @@ class CovidLightningEfficientNet(LightningModule):
             # The problem with `triangular2` is it decays *way* too quickly.
             optimizer = SGD(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
             steps_per_epoch = trainloader_length(self.params.batch_size)
-            stepsize_up = 10 * steps_per_epoch
+            epochs = self.params.max_epochs
+            cycle_length = epochs / (1 * steps_per_epoch)  # division by two makes us hit min FAST
+            stepsize_up = cycle_length // 2
             lr_key = f"{self.params.version}{'-pretrain' if self.params.pretrain else ''}"
             max_lr = MAX_LRS[lr_key]
             base_lr = MIN_LRS[lr_key]
