@@ -32,6 +32,7 @@ class EfficientNetArgs:
         parser.add_argument("--lrtest-epochs-to-max", type=float, default=1500)
 
         # augmentation params
+        parser.add_argument("--dropout", type=float, default=0.2)
         parser.add_argument("--no-elastic", action="store_true")
         parser.add_argument("--no-rand-crop", action="store_true")
         parser.add_argument("--no-flip", action="store_true")
@@ -62,9 +63,12 @@ class EfficientNetArgs:
         flip = "rflip" if not hp.no_flip else ""
         elas = "elstic" if not hp.no_elastic else ""
         noise = "noise" if hp.noise else ""
-        augs = f"{crop}+{flip}+{elas}+{noise}".replace("++", "+")
+        drop = f"drp{hp.dropout:0.1f}"
+        augs = f"{crop}+{flip}+{elas}+{noise}+{drop}".replace("++", "+")
         if augs[-1] == "+":
             augs = augs[:-1]
+        if augs[0] == "+":
+            augs = augs[1:]
 
         if info == "scriptname":
             return f"submit__eff-net-{ver}{pre}_{sched}_{lr}_{wd}_{b}batch_{e}ep_{augs}.sh"
