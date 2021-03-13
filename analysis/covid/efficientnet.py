@@ -157,53 +157,32 @@ class CovidLightningEfficientNet(LightningModule):
 
     @no_type_check
     def training_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int):
-        x, y = batch
-        out = self(x)  # out of linear layer
-        loss = Loss()(out, y)
-        pred = torch.sigmoid(out)
-        y_int = y.int()
-        acc = accuracy(pred, y_int)
-        # f1score = f1(pred, y, 2)
-        # self.log("train_f1", f1score, prog_bar=True)
+        loss, acc = self.step_helper(batch, batch_idx)
         self.log("train_loss", loss, prog_bar=True)
         self.log("train_acc", acc, prog_bar=True)
         return loss
 
     @no_type_check
     def validation_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int):
-        x, y = batch
-        out = self(x)  # out of linear layer
-        loss = Loss()(out, y)
-        # pred = torch.round(torch.sigmoid(out))
-        pred = torch.sigmoid(out)
-        y_int = y.int()
-        acc = accuracy(pred, y_int)
-        acc01 = accuracy(pred, y_int, threshold=0.1)
-        acc09 = accuracy(pred, y_int, threshold=0.9)
-        # auc = auroc(pred, y)
-        # f1score = f1(pred, y, num_classes=2)
+        loss, acc = self.step_helper(batch, batch_idx)
         self.log("val_loss", loss, prog_bar=True)
-        # self.log("val_auc", auc)
-        # self.log("val_f1", f1score)
         self.log("val_acc", acc, prog_bar=True)
-        self.log("val_acc0.10", acc01, prog_bar=False)
-        self.log("val_acc0.90", acc09, prog_bar=False)
 
     @no_type_check
     def test_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int):
+        loss, acc = self.step_helper(batch, batch_idx)
+        self.log("test_loss", loss)
+        self.log("test_acc", acc)
+
+    @no_type_check
+    def step_helper(self, batch: Tuple[Tensor, Tensor], batch_idx: int):
         x, y = batch
         out = self(x)  # out of linear layer
         loss = Loss()(out, y)
-        # pred = torch.round(torch.sigmoid(out))
         pred = torch.sigmoid(out)
         y_int = y.int()
         acc = accuracy(pred, y_int)
-        acc01 = accuracy(pred, y_int, threshold=0.1)
-        acc09 = accuracy(pred, y_int, threshold=0.9)
-        self.log("test_loss", loss)
-        self.log("test_acc", acc)
-        self.log("test_acc0.10", acc01)
-        self.log("test_acc0.90", acc09)
+        return loss, acc
 
     @no_type_check
     def configure_optimizers(self) -> Optimizer:
@@ -325,9 +304,6 @@ if __name__ == "__main__":
     # args dictionary, so you can override what you want with it
     callbacks = [LearningRateMonitor(logging_interval="epoch")]
     trainer = Trainer.from_argparse_args(hparams, callbacks=callbacks, **trainer_defaults(hparams))
-    # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000, overfit_batches=0.1)
-    # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000)
-    # trainer = Trainer(default_root_dir=LOGDIR, gpus=1, max_epochs=3000)
     trainer.fit(model, datamodule=dm)
     results = trainer.test(model, datamodule=dm)
     # we don't really need to print because tensorboard logs the test result
