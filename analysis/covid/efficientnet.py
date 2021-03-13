@@ -294,7 +294,7 @@ if __name__ == "__main__":
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000, overfit_batches=0.1)
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000)
     # trainer = Trainer(default_root_dir=LOGDIR, gpus=1, max_epochs=3000)
-    trainer.fit(model, datamodule=dm, weights_summary="full")
+    trainer.fit(model, datamodule=dm)
     results = trainer.test(model, datamodule=dm)
     # we don't really need to print because tensorboard logs the test result
     for key, val in results[0].items():
