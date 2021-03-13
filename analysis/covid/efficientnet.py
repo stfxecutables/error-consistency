@@ -37,11 +37,13 @@ MAX_LRS: Dict[str, float] = {
     "b0-pretrain": 0.01,
     "b1-pretrain": 0.01,
 }
+# MIN_LR = 1e-4
+MIN_LR = 1e-3
 MIN_LRS: Dict[str, float] = {
-    "b0": 1e-4,
-    "b1": 1e-4,
-    "b0-pretrain": 1e-4,
-    "b1-pretrain": 1e-4,
+    "b0": MIN_LR,
+    "b1": MIN_LR,
+    "b0-pretrain": MIN_LR,
+    "b1-pretrain": MIN_LR,
 }
 # fmt: on
 
@@ -299,4 +301,3 @@ if __name__ == "__main__":
     # we don't really need to print because tensorboard logs the test result
     for key, val in results[0].items():
         print(f"{key:>12}: {val:1.4f}")
-
