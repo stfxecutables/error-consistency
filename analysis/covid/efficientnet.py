@@ -205,7 +205,7 @@ class CovidLightningEfficientNet(LightningModule):
         optimizer = SGD(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         mode = self.params.cyclic_mode
         mode_alts = {"tr": "triangular", "tr2": "triangular2", "gamma": "exp_range"}
-        mode = mode_alts["mode"]
+        mode = mode_alts[mode] if mode in mode_alts else mode
         # lr_key = f"{self.params.version}{'-pretrain' if self.params.pretrain else ''}"
         # max_lr = MAX_LRS[lr_key]
         # base_lr = MIN_LRS[lr_key]
