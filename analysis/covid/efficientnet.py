@@ -38,10 +38,10 @@ MAX_LRS: Dict[str, float] = {
     "b1-pretrain": 0.01,
 }
 MIN_LRS: Dict[str, float] = {
-    "b0": 1e-5,
-    "b1": 1e-5,
-    "b0-pretrain": 1e-6,
-    "b1-pretrain": 1e-6,
+    "b0": 1e-4,
+    "b1": 1e-4,
+    "b0-pretrain": 1e-4,
+    "b1-pretrain": 1e-4,
 }
 # fmt: on
 
@@ -116,7 +116,11 @@ class CovidEfficientNet(Module):
             )
         else:
             self.model = EfficientNet.from_name(
-                f"efficientnet-{version}", in_channels=1, num_classes=1, image_size=(RESIZE, RESIZE)
+                f"efficientnet-{version}",
+                in_channels=1,
+                num_classes=1,
+                image_size=(RESIZE, RESIZE),
+                dropout_rate=hparams.dropout,
             )
         # in_features = self._get_output_size()
         # self.gap = GlobalAveragePooling(reduction_dim=1, keepdim=True)
@@ -201,6 +205,7 @@ class CovidLightningEfficientNet(LightningModule):
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
             return [optimizer], [scheduler]
         elif self.lr_schedule == "cyclic":
+            # The problem with `triangular2` is it decays *way* too quickly.
             optimizer = SGD(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
             steps_per_epoch = trainloader_length(self.params.batch_size)
             stepsize_up = 10 * steps_per_epoch
@@ -209,7 +214,11 @@ class CovidLightningEfficientNet(LightningModule):
             base_lr = MIN_LRS[lr_key]
 
             scheduler = torch.optim.lr_scheduler.CyclicLR(
-                optimizer, base_lr=base_lr, max_lr=max_lr, mode="triangular2", step_size_up=stepsize_up
+                optimizer,
+                base_lr=base_lr,
+                max_lr=max_lr,
+                mode="triangular2",
+                step_size_up=stepsize_up,
             )
             scheduler = {"scheduler": scheduler, "interval": "step"}
             return [optimizer], [scheduler]
@@ -283,7 +292,7 @@ if __name__ == "__main__":
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000, overfit_batches=0.1)
     # trainer = Trainer(gpus=1, val_check_interval=0.5, max_epochs=1000)
     # trainer = Trainer(default_root_dir=LOGDIR, gpus=1, max_epochs=3000)
-    trainer.fit(model, datamodule=dm)
+    trainer.fit(model, datamodule=dm, weights_summary="full")
     results = trainer.test(model, datamodule=dm)
     # we don't really need to print because tensorboard logs the test result
     for key, val in results[0].items():
