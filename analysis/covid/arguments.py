@@ -18,18 +18,22 @@ class EfficientNetArgs:
     @staticmethod
     def add_model_specific_args(parser: ArgumentParser) -> ArgumentParser:
         # model-specific args
+        lr_choices = ["cosine", "cyclic", "linear-test", "one-cycle", "none", "None"]
+        cyclic_choices = ["tr", "triangular", "triangular2", "tr2", "gamma", "exp_range"]
         parser = ArgumentParser(parents=[parser], add_help=False)
         parser.add_argument("--pretrain", action="store_true")  # i.e. do pre-train if flag
         parser.add_argument("--initial-lr", type=float, default=0.001)
         parser.add_argument("--weight-decay", type=float, default=0.00001)
-        parser.add_argument(
-            "--lr-schedule",
-            choices=["cosine", "cyclic", "linear-test", "one-cycle", "none", "None"],
-        )
+
+        # learning rate args
+        parser.add_argument("--lr-schedule", choices=lr_choices)
         parser.add_argument("--onecycle-pct", type=float, default=0.05)
         parser.add_argument("--lrtest-min", type=float, default=1e-6)
         parser.add_argument("--lrtest-max", type=float, default=0.05)
         parser.add_argument("--lrtest-epochs-to-max", type=float, default=1500)
+        parser.add_argument("--cyclic-mode", choices=cyclic_choices, default="gamma")
+        parser.add_argument("--cyclic-max", type=float, default=0.01)
+        parser.add_argument("--cyclic-base", type=float, default=1e-4)
 
         # augmentation params
         parser.add_argument("--dropout", type=float, default=0.2)
@@ -47,13 +51,24 @@ class EfficientNetArgs:
 
         # learning rate-related
         sched = hp.lr_schedule
+        lr = f"lr0={hp.initial_lr:1.2e}"
+        is_range_test = sched == "linear-test"
         if sched == "one-cycle":
             sched = f"{sched}{hp.onecycle_pct:1.2f}"
-        is_range_test = sched == "linear-test"
-        lr = f"lr0={hp.initial_lr:1.2e}"
-        if is_range_test:
+        elif is_range_test:
             sched = str(sched).upper()
             lr = f"lr-max={hp.lrtest_max}@{hp.lrtest_epochs_to_max}"
+        elif sched == "cyclic":
+            mode = hp.cyclic_mode
+            if mode in ["tr", "triangular"]:
+                m = "tr"
+            elif mode in ["tr2", "triangular2"]:
+                m = "tr2"
+            else:
+                m = "exp"
+            lr_max = hp.cyclic_max
+            lr_base = hp.cyclic_base
+            lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e})"
         wd = f"L2={hp.weight_decay:1.2e}"
         b = hp.batch_size
         e = hp.max_epochs
