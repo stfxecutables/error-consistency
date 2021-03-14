@@ -1,26 +1,32 @@
 from argparse import Namespace
 from typing import Callable, cast, Optional
 
+import sys
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from pathlib import Path
 from monai.transforms import Rand2DElastic as Elastic
 from monai.transforms import RandGaussianNoise, RandSpatialCrop, Resize
 from torch import Tensor
 from torchvision.transforms import Compose
 from typing_extensions import Literal
 
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from analysis.covid.arguments import EfficientNetArgs
+
 Transform = Callable[[Tensor], Tensor]
 
 RESIZE = 224
-ELASTIC_ARGS = dict(
+ELASTIC_ARGS_DEFAULT = dict(
     spacing=0.5,
     magnitude_range=(0.01, 0.2),
     prob=1.0,
     rotate_range=np.pi / 40,  # radians
     shear_range=0.1,
     translate_range=(0.3, 0.3),
-    scale_range=(0.1, 0.1),
+    # scale_range=(0.1, 0.1),
+    scale_range=(0.2, 0.2),
     padding_mode="reflection",
 )
 
@@ -46,7 +52,13 @@ def get_transform(
         return None
     rflip = RandomHorizontalFlip(p=0.3, spatial_axis=-1)
     noise = RandGaussianNoise(prob=0.2)
-    elast = Elastic(**ELASTIC_ARGS)
+    arg_overrides = dict(
+        rotate_range=hparams.elastic_degree * np.pi / 180,
+        shear_range=hparams.elastic_shear,
+        translate_range=(hparams.elastic_trans, hparams.elastic_trans),
+        scale_range=(hparams.elastic_scale, hparams.elastic_scale),
+    )
+    elast = Elastic(**{**ELASTIC_ARGS_DEFAULT, **arg_overrides})
     train_transforms = list(
         filter(
             lambda t: t is not None,
@@ -64,7 +76,15 @@ def get_transform(
 
 
 def test_elastic() -> None:
-    transform = Elastic(**ELASTIC_ARGS)
+    hparams = EfficientNetArgs.defaults()
+    arg_overrides = dict(
+        rotate_range=hparams.elastic_degree * np.pi / 180,
+        shear_range=hparams.elastic_shear,
+        translate_range=(hparams.elastic_trans, hparams.elastic_trans),
+        scale_range=(hparams.elastic_scale, hparams.elastic_scale),
+    )
+    args = {**ELASTIC_ARGS_DEFAULT, **arg_overrides}
+    transform = Elastic(**args)
     data = np.load("/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_test.npy")
     idx = np.random.randint(0, len(data))
     x = np.load("/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_test.npy")[idx]
@@ -81,12 +101,13 @@ def test_elastic() -> None:
     axes.flat[center].set_title(f"Original image {idx}")
     fig.set_size_inches(w=16, h=18)
     fig.subplots_adjust(hspace=0.3, wspace=0.1)
-    fig.suptitle(str(ELASTIC_ARGS))
+    fig.suptitle(str(args))
     plt.show()
 
 
 def test_total() -> None:
-    transform = get_transform("train")  # type: ignore
+    hparams = EfficientNetArgs.defaults()
+    transform = get_transform(hparams, "train")  # type: ignore
     data = np.load("/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_test.npy")
     idx = np.random.randint(0, len(data))
     x = np.load("/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_test.npy")[idx]
@@ -104,11 +125,11 @@ def test_total() -> None:
     axes.flat[center].set_title(f"Original image {idx}")
     fig.set_size_inches(w=16, h=18)
     fig.subplots_adjust(hspace=0.3, wspace=0.1)
-    fig.suptitle(str(ELASTIC_ARGS))
+    fig.suptitle(str(ELASTIC_ARGS_DEFAULT))
     plt.show()
 
 
 if __name__ == "__main__":
-    for _ in range(5):
-        # test_elastic()
-        test_total()
+    for _ in range(2):
+        test_elastic()
+        # test_total()

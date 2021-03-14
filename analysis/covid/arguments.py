@@ -37,11 +37,21 @@ class EfficientNetArgs:
 
         # augmentation params
         parser.add_argument("--dropout", type=float, default=0.2)
+        parser.add_argument("--elastic-scale", type=float, default=0.1)
+        parser.add_argument("--elastic-trans", type=float, default=0.3)
+        parser.add_argument("--elastic-shear", type=float, default=0.1)
+        parser.add_argument("--elastic-degree", type=float, default=5)
         parser.add_argument("--no-elastic", action="store_true")
         parser.add_argument("--no-rand-crop", action="store_true")
         parser.add_argument("--no-flip", action="store_true")
         parser.add_argument("--noise", action="store_true")
         return parser
+
+    @staticmethod
+    def defaults() -> Namespace:
+        parser = EfficientNetArgs.program_level_parser()
+        parser = EfficientNetArgs.add_model_specific_args(parser)
+        return parser.parse_args()
 
     @staticmethod
     def info_from_args(args: Namespace, info: str) -> str:
@@ -76,7 +86,12 @@ class EfficientNetArgs:
         # augments
         crop = "crop" if not hp.no_rand_crop else ""
         flip = "rflip" if not hp.no_flip else ""
-        elas = "elstic" if not hp.no_elastic else ""
+        elas = "elst" if not hp.no_elastic else ""
+        if elas != "":
+            elas = (
+                f"{elas}(sc={hp.elastic_scale}_tr={hp.elastic_trans}"
+                f"_sh={hp.elastic_shear}_deg={hp.elastic_degree})"
+            )
         noise = "noise" if hp.noise else ""
         drop = f"drp{hp.dropout:0.1f}"
         augs = f"{crop}+{flip}+{elas}+{noise}+{drop}".replace("++", "+")

@@ -156,8 +156,8 @@ def test_gamma_cyclic_values() -> None:
             base_lr=base_lr,
             max_lr=max_lr,
             mode="exp_range",
-            step_size_up=stepsize_up / 2,
-            gamma=np.exp(np.log(base_lr * 10 / max_lr) / epochs),
+            step_size_up=stepsize_up / 3,
+            gamma=np.exp(np.log(base_lr * 40 / max_lr) / epochs),
         )
         lrs = [scheduler.get_last_lr()]
         es = [0]
