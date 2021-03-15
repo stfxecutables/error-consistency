@@ -34,6 +34,7 @@ class EfficientNetArgs:
         parser.add_argument("--cyclic-mode", choices=cyclic_choices, default="gamma")
         parser.add_argument("--cyclic-max", type=float, default=0.01)
         parser.add_argument("--cyclic-base", type=float, default=1e-4)
+        parser.add_argument("--cyclic-f", type=int, default=60)
 
         # augmentation params
         parser.add_argument("--dropout", type=float, default=0.2)
@@ -78,7 +79,11 @@ class EfficientNetArgs:
                 m = "exp"
             lr_max = hp.cyclic_max
             lr_base = hp.cyclic_base
-            lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e})"
+            f = hp.cyclic_f
+            if mode in ["gamma", "exp_range"]:
+                lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e},f={f})"
+            else:
+                lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e})"
         wd = f"L2={hp.weight_decay:1.2e}"
         b = hp.batch_size
         e = hp.max_epochs

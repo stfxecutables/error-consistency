@@ -137,10 +137,12 @@ def test_gamma_cyclic_values() -> None:
         model = Sequential(PReLU())
         optimizer = SGD(model.parameters(), lr=0.01, weight_decay=1e-5)
         steps_per_epoch = trainloader_length(BATCH_SIZE)
-        cycle_length = epochs / (1 * steps_per_epoch)
+        cycle_length = epochs / steps_per_epoch
         stepsize_up = cycle_length // 2
-        max_lr = 0.01
-        base_lr = 1e-4
+        # max_lr = 0.01
+        # base_lr = 1e-4
+        max_lr = 0.1
+        base_lr = 1e-3
         # when using gamma we need to ensure at the last epoch the max is some reasonable value
         # IMO something like `base_lr * 4` is fine. Since the actual `cyc_max_lr` will be
         # `max_lr * gamma ** epoch`, we can get where we want by solving this equation. That is
@@ -151,13 +153,16 @@ def test_gamma_cyclic_values() -> None:
         # The solution to this is:
         #
         #       gamma = np.exp(np.log(base_lr * 4 / max_lr)  / max_epochs)
+        r = base_lr / max_lr
+        f = 60  # desired final max oscillation height times base_lr
+        gamma = np.exp(np.log(f * r) / epochs)
         scheduler = torch.optim.lr_scheduler.CyclicLR(
             optimizer,
             base_lr=base_lr,
             max_lr=max_lr,
             mode="exp_range",
-            step_size_up=stepsize_up / 3,
-            gamma=np.exp(np.log(base_lr * 40 / max_lr) / epochs),
+            step_size_up=stepsize_up / 2,
+            gamma=gamma,
         )
         lrs = [scheduler.get_last_lr()]
         es = [0]

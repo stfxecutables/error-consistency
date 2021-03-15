@@ -215,7 +215,9 @@ class CovidLightningEfficientNet(LightningModule):
         cycle_length = epochs / steps_per_epoch  # division by two makes us hit min FAST
         stepsize_up = cycle_length // 2
         # see lr_scheduling.py for motivation behind this
-        gamma = np.exp(np.log(base_lr * 10 / max_lr) / epochs) if mode == "exp_range" else 1.0
+        r = base_lr / max_lr
+        f = 60  # f == 1 means final max_lr is base_lr. f == 100 means triangular
+        gamma = np.exp(np.log(f * r) / epochs) if mode == "exp_range" else 1.0
         stepsize_up = stepsize_up // 2 if mode == "exp_range" else stepsize_up
         sched = CyclicLR(
             optimizer,
