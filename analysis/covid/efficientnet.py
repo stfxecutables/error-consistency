@@ -306,7 +306,7 @@ if __name__ == "__main__":
     # args dictionary, so you can override what you want with it
     callbacks = [
         LearningRateMonitor(logging_interval="epoch"),
-        EarlyStopping("train_acc", min_delta=0.0025, patience=10),
+        EarlyStopping("train_acc", min_delta=0.01, patience=5, mode="max"),
     ]
     trainer = Trainer.from_argparse_args(hparams, callbacks=callbacks, **trainer_defaults(hparams))
     trainer.fit(model, datamodule=dm)
