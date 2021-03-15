@@ -41,8 +41,8 @@ VERSION = "v0"
 TEMPLATE = """#!/bin/bash
 #SBATCH --account=def-jlevman
 #SBATCH --time=1-00:00:00  # [dd]-[hh]:[mm]:[ss]
-#SBATCH --job-name=effnet_{version}
-#SBATCH --output=eff{version}%A_array%a__%j.out
+#SBATCH --job-name=eff{version}{pre}
+#SBATCH --output=eff{version}{pre}__%j.out
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=6
 #SBATCH --mem-per-cpu=16G
@@ -77,9 +77,10 @@ def script_from_args() -> None:
     parser = EfficientNetArgs.program_level_parser()
     parser = EfficientNetArgs.add_model_specific_args(parser)
     args = parser.parse_args()
+    pre = "_pre" if args.pretrain else ""
     script_path = SCRIPTS_DIR / EfficientNetArgs.info_from_args(args, info="scriptname")
     version = args.version
-    script = TEMPLATE.format(version=version, args=" ".join(sys.argv[1:]))
+    script = TEMPLATE.format(version=version, args=" ".join(sys.argv[1:]), pre=pre)
     with open(script_path, "w") as file:
         file.writelines(script)
     print(f"Saved job submission script to {script_path}")
