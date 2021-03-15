@@ -1,5 +1,6 @@
 from typing import List
 
+import math
 import sys
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,15 +16,48 @@ from torch.utils.data.dataset import Dataset
 from pytorch_lightning.metrics.functional import accuracy, auroc, f1
 from torch.nn import BCEWithLogitsLoss as Loss
 from torch.optim import SGD
-from torch.optim.lr_scheduler import CyclicLR
-from typing import Any, Optional, no_type_check, Tuple
+from torch.optim.optimizer import Optimizer
+from torch.optim.lr_scheduler import CyclicLR, LambdaLR
+from torch.optim.lr_scheduler import _LRScheduler
+from typing import Any, Optional, no_type_check, Tuple, Callable
 from pathlib import Path
+import warnings
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from analysis.covid.datamodule import trainloader_length
 
 EPOCHS = [1000, 2000, 3000, 4000, 5000]
 LR0 = 0.01
+
+
+class RandomLinearDecayingLR(_LRScheduler):
+    def __init__(
+        self,
+        optimizer: Optimizer,
+        eta_min: float = 1e-6,
+        eta_max: float = 0.1,
+        max_epochs: int = None,
+        batch_size: int = None,
+        last_epoch: int = -1,
+    ) -> None:
+        self.eta_min = eta_min
+        self.eta_max = eta_max
+        self.max_epochs = max_epochs
+        # self.batch_size = batch_size
+        self.total_steps = trainloader_length(batch_size) * max_epochs
+        super().__init__(optimizer, last_epoch=last_epoch)
+
+    def get_lr(self) -> float:
+        if not self._get_lr_called_within_step:
+            warnings.warn(
+                "To get the last learning rate computed by the scheduler, "
+                "please use `get_last_lr()`."
+            )
+
+        emin, emax = self.eta_min, self.eta_max
+        epoch_max = emin + (emax - emin) * (1 - self.last_epoch / self.max_epochs)
+        lr = float(np.random.uniform(self.eta_min, epoch_max))
+        return [lr for base_lr in self.base_lrs]
 
 
 def dummy_data() -> TensorDataset:
@@ -182,10 +216,46 @@ def test_gamma_cyclic_values() -> None:
     plt.show()
 
 
+def test_random_values() -> None:
+    BATCH_SIZE = 128
+    sbn.set_style("darkgrid")
+    fig, axes = plt.subplots(ncols=len(EPOCHS), sharey=True)
+    for i, epochs in enumerate(EPOCHS):
+        model = Sequential(PReLU())
+        steps_per_epoch = trainloader_length(BATCH_SIZE)
+        base_lr = 1e-4
+        max_lr = 0.01
+        optimizer = SGD(model.parameters(), lr=base_lr, weight_decay=1e-5)
+        scheduler = RandomLinearDecayingLR(
+            optimizer, eta_max=0.01, eta_min=1e-4, max_epochs=epochs, batch_size=BATCH_SIZE
+        )
+        lrs = [scheduler.get_last_lr()]
+        es = [0]
+        for e in range(epochs):
+            optimizer.step()
+            scheduler.step()
+            lrs.append(scheduler.get_last_lr())
+            es.append(e)
+            # for step in range(steps_per_epoch):
+            # optimizer.step()
+            # scheduler.step()
+            # lrs.append(scheduler.get_last_lr())
+            # es.append(e)
+        axes.flat[i].plot(es, lrs, color="black", label="epoch", lw=0.2)
+        axes.flat[i].set_ylabel("LR")
+        axes.flat[i].set_xlabel("Epoch")
+        axes.flat[i].set_title(f"Min: {np.min(lrs):0.1e}\nMax: {np.max(lrs):0.1e}")
+        axes.flat[i].legend().set_visible(True)
+    fig.suptitle(f"Random learning rate. max_lr={max_lr}, base_lr={base_lr}")
+    fig.set_size_inches(w=6 * len(EPOCHS), h=4)
+    plt.show()
+
+
 if __name__ == "__main__":
     # plot_decay_function(0.001)
     # plot_multiplicative_decay_function(0.01)
 
     # test_small_cyclic_values()
-    test_gamma_cyclic_values()
+    # test_gamma_cyclic_values()
     # test_triangular_cyclic_values()
+    test_random_values()

@@ -8,7 +8,7 @@ from typing import Any, Dict, Tuple, no_type_check, List, Union
 import torch
 from efficientnet_pytorch import EfficientNet
 from pytorch_lightning import LightningModule, Trainer
-from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import LearningRateMonitor, EarlyStopping
 from pytorch_lightning.metrics.functional import accuracy, auroc, f1
 from torch import Tensor
 from torch.nn import BatchNorm2d
@@ -304,7 +304,10 @@ if __name__ == "__main__":
     model = CovidLightningEfficientNet(hparams)
     # if you read the source, the **kwargs in Trainer.from_argparse_args just call .update on an
     # args dictionary, so you can override what you want with it
-    callbacks = [LearningRateMonitor(logging_interval="epoch")]
+    callbacks = [
+        LearningRateMonitor(logging_interval="epoch"),
+        EarlyStopping("train_acc", min_delta=0.0025, patience=10),
+    ]
     trainer = Trainer.from_argparse_args(hparams, callbacks=callbacks, **trainer_defaults(hparams))
     trainer.fit(model, datamodule=dm)
     results = trainer.test(model, datamodule=dm)
