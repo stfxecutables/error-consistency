@@ -290,6 +290,7 @@ def trainer_defaults(hparams: Namespace) -> Dict:
         progress_bar_refresh_rate=refresh_rate,
         gpus=1,
         max_epochs=max_epochs,
+        min_epochs=500,
     )
 
 
@@ -306,7 +307,7 @@ if __name__ == "__main__":
     # args dictionary, so you can override what you want with it
     callbacks = [
         LearningRateMonitor(logging_interval="epoch"),
-        EarlyStopping("train_acc", min_delta=0.01, patience=5, mode="max"),
+        EarlyStopping("train_acc", min_delta=0.001, patience=300, mode="max"),
     ]
     trainer = Trainer.from_argparse_args(hparams, callbacks=callbacks, **trainer_defaults(hparams))
     trainer.fit(model, datamodule=dm)

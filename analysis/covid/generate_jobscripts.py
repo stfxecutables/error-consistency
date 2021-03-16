@@ -40,7 +40,7 @@ VERSION = "v0"
 
 TEMPLATE = """#!/bin/bash
 #SBATCH --account=def-jlevman
-#SBATCH --time=1-00:00:00  # [dd]-[hh]:[mm]:[ss]
+#SBATCH --time=0-05:00:00  # [dd]-[hh]:[mm]:[ss]
 #SBATCH --job-name=eff{version}{pre}
 #SBATCH --output=eff{version}{pre}__%j.out
 #SBATCH --ntasks-per-node=1
