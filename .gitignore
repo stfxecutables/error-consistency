@@ -1,6 +1,9 @@
 # Error-Consistency Specific Ignores
 .vscode
 **/*results
+analysis/covid/logs
+analysis/covid/job_scripts/submit__eff*.sh
+analysis/job_scripts/submit__eff*.sh
 tests/datasets/covid-ct
 
 
