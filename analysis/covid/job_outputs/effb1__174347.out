@@ -1,0 +1,16 @@
+Starting training efficientnet-b1 with args --version=b1 --lr-schedule=cyclic --cyclic-max=1e-1 --cyclic-base=1e-4 --max-epochs=2000 --batch-size=128 --dropout=0.4 --weight-decay=1e-2 --elastic-scale=0.3 --elastic-trans=0.3 --elastic-shear=0.2 --elastic-degree=5 at Tue Mar 16 00:15:07 UTC 2021.
+TensorFlow installation not found - running with reduced feature set.
+TensorBoard 2.4.1 at http://0.0.0.0:6006/ (Press CTRL+C to quit)
+GPU available: True, used: True
+TPU available: None, using: 0 TPU cores
+Set SLURM handle signals.
+
+  | Name  | Type              | Params
+--------------------------------------------
+0 | model | CovidEfficientNet | 6.5 M 
+--------------------------------------------
+6.5 M     Trainable params
+0         Non-trainable params
+6.5 M     Total params
+26.056    Total estimated model params size (MB)
+slurmstepd: error: *** JOB 174347 ON cg001 CANCELLED AT 2021-03-16T00:16:10 ***

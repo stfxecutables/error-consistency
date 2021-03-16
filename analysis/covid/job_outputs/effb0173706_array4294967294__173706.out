@@ -1,0 +1,14 @@
+
+The following have been reloaded with a version change:
+  1) python/3.7.4 => python/3.8.2
+
+Starting training efficientnet-b0 with args --version=b0 --pretrain at Sat Mar 13 00:34:20 UTC 2021.
+TensorFlow installation not found - running with reduced feature set.
+TensorBoard 2.4.1 at http://0.0.0.0:6006/ (Press CTRL+C to quit)
+GPU available: True, used: True
+TPU available: None, using: 0 TPU cores
+Loaded pretrained weights for efficientnet-b0
+Traceback (most recent call last):
+  File "/home/dberger/projects/def-jlevman/dberger/error-consistency/analysis/covid/efficientnet.py", line 297, in <module>
+    trainer.fit(model, datamodule=dm, weights_summary="full")
+TypeError: fit() got an unexpected keyword argument 'weights_summary'

@@ -1,0 +1,23 @@
+Starting training efficientnet-b0 with args --version=b0 --pretrain --lr-schedule=cyclic --cyclic-mode=gamma --max-epochs=4000 --batch-size=128 at Sun Mar 14 06:11:57 UTC 2021.
+TensorFlow installation not found - running with reduced feature set.
+TensorBoard 2.4.1 at http://0.0.0.0:6006/ (Press CTRL+C to quit)
+GPU available: True, used: True
+TPU available: None, using: 0 TPU cores
+Set SLURM handle signals.
+
+  | Name  | Type              | Params
+--------------------------------------------
+0 | model | CovidEfficientNet | 4.0 M 
+--------------------------------------------
+4.0 M     Trainable params
+0         Non-trainable params
+4.0 M     Total params
+16.033    Total estimated model params size (MB)
+Loaded pretrained weights for efficientnet-b0
+--------------------------------------------------------------------------------
+DATALOADER:0 TEST RESULTS
+{'test_acc': 0.6847290396690369, 'test_loss': 1.3103102445602417}
+--------------------------------------------------------------------------------
+   test_loss: 1.3103
+    test_acc: 0.6847
+Finished training efficientnet-b0 with args --version=b0 --pretrain --lr-schedule=cyclic --cyclic-mode=gamma --max-epochs=4000 --batch-size=128 at Sun Mar 14 12:26:06 UTC 2021.

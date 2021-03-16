@@ -1,0 +1,4 @@
+Starting Tensorboard
+TensorFlow installation not found - running with reduced feature set.
+TensorBoard 2.4.1 at http://0.0.0.0:6006/ (Press CTRL+C to quit)
+slurmstepd: error: *** JOB 174165 ON cl049 CANCELLED AT 2021-03-15T15:07:05 DUE TO TIME LIMIT ***
