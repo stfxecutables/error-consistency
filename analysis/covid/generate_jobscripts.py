@@ -38,9 +38,12 @@ echo "Training finished at $(date)."
 TIME = "1-00:00:00"
 VERSION = "v0"
 
+# the #SBATCH --signal=INT@180 line sends a sig int before job end, which
+# will usually trigger Lightning to run the test
 TEMPLATE = """#!/bin/bash
 #SBATCH --account=def-jlevman
 #SBATCH --time=0-05:00:00  # [dd]-[hh]:[mm]:[ss]
+#SBATCH --signal=INT@300
 #SBATCH --job-name=eff{version}{pre}
 #SBATCH --output=eff{version}{pre}__%j.out
 #SBATCH --ntasks-per-node=1
