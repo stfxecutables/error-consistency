@@ -1,1 +1,1 @@
-fd --regex 'submit__eff' -x sbatch {}
+fd --no-ignore --regex 'submit__eff' -x sbatch {}
