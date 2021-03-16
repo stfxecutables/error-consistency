@@ -8,7 +8,12 @@ from typing import Any, Dict, Tuple, no_type_check, List, Union
 import torch
 from efficientnet_pytorch import EfficientNet
 from pytorch_lightning import LightningModule, Trainer
-from pytorch_lightning.callbacks import LearningRateMonitor, EarlyStopping
+from pytorch_lightning.callbacks import (
+    LearningRateMonitor,
+    EarlyStopping,
+    Callback,
+    ModelCheckpoint,
+)
 from pytorch_lightning.metrics.functional import accuracy, auroc, f1
 from torch import Tensor
 from torch.nn import BatchNorm2d
@@ -281,6 +286,23 @@ class CovidLightningEfficientNet(LightningModule):
         return [optimizer], [scheduler]
 
 
+def callbacks(hparams: Namespace) -> List[Callback]:
+    logdir = EfficientNetArgs.info_from_args(hparams, info="logpath")
+    return [
+        LearningRateMonitor(logging_interval="epoch"),
+        EarlyStopping("train_acc", min_delta=0.001, patience=300, mode="max"),
+        ModelCheckpoint(
+            dirpath=logdir,
+            filename="{epoch}-{step}_{val_acc:.2f}_{train_acc:0.3f}",
+            monitor="val_acc",
+            save_last=True,
+            save_top_k=2,
+            mode="max",
+            save_weights_only=False,
+        ),
+    ]
+
+
 def trainer_defaults(hparams: Namespace) -> Dict:
     logdir = EfficientNetArgs.info_from_args(hparams, info="logpath")
     refresh_rate = 0 if IN_COMPUTE_CANADA_JOB else None
@@ -290,7 +312,7 @@ def trainer_defaults(hparams: Namespace) -> Dict:
         progress_bar_refresh_rate=refresh_rate,
         gpus=1,
         max_epochs=max_epochs,
-        min_epochs=500,
+        min_epochs=1000,
     )
 
 
@@ -305,11 +327,9 @@ if __name__ == "__main__":
     model = CovidLightningEfficientNet(hparams)
     # if you read the source, the **kwargs in Trainer.from_argparse_args just call .update on an
     # args dictionary, so you can override what you want with it
-    callbacks = [
-        LearningRateMonitor(logging_interval="epoch"),
-        EarlyStopping("train_acc", min_delta=0.001, patience=300, mode="max"),
-    ]
-    trainer = Trainer.from_argparse_args(hparams, callbacks=callbacks, **trainer_defaults(hparams))
+    trainer = Trainer.from_argparse_args(
+        hparams, callbacks=callbacks(hparams), **trainer_defaults(hparams)
+    )
     trainer.fit(model, datamodule=dm)
     results = trainer.test(model, datamodule=dm)
     # we don't really need to print because tensorboard logs the test result
