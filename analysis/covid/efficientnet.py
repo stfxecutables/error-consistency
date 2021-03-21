@@ -1,38 +1,36 @@
 import os
 import sys
-import numpy as np
-from argparse import ArgumentParser, Namespace
+from argparse import Namespace
 from pathlib import Path
-from typing import Any, Dict, Tuple, no_type_check, List, Union
+from typing import Any, Dict, List, Tuple, no_type_check
 
 import torch
 from efficientnet_pytorch import EfficientNet
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.callbacks import (
-    LearningRateMonitor,
-    EarlyStopping,
     Callback,
+    EarlyStopping,
+    LearningRateMonitor,
     ModelCheckpoint,
 )
-from pytorch_lightning.metrics.functional import accuracy, auroc, f1
+from pytorch_lightning.metrics.functional import accuracy
 from torch import Tensor
 from torch.nn import BatchNorm2d
 from torch.nn import BCEWithLogitsLoss as Loss
 from torch.nn import Conv2d, LeakyReLU, Module
-from torch.optim import Adam, SGD
+from torch.optim import Adam
 from torch.optim.optimizer import Optimizer
-from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
-from torch.optim.lr_scheduler import (
-    CyclicLR,
-    OneCycleLR,
-    CosineAnnealingLR,
-    LambdaLR,
-)  # type: ignore
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-from analysis.covid.datamodule import CovidCTDataModule, trainloader_length
-from analysis.covid.transforms import RESIZE
 from analysis.covid.arguments import EfficientNetArgs
+from analysis.covid.datamodule import CovidCTDataModule
+from analysis.covid.lr_scheduling import (
+    cosine_scheduling,
+    cyclic_scheduling,
+    linear_test_scheduling,
+    onecycle_scheduling,
+)
+from analysis.covid.transforms import RESIZE
 
 SIZE = (256, 256)
 
@@ -43,22 +41,6 @@ ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 # note these were tested with a batch size of 128 and various regularization params:
 #
 # efficientnet-bX-pretrained/_LINEAR-TEST_lr-max=0.05@1500_L2=1.00e-05_128batch_crop+rflip+elstic
-# fmt: off
-MAX_LRS: Dict[str, float] = {
-    "b0": 0.01,
-    "b1": 0.01,
-    "b0-pretrain": 0.01,
-    "b1-pretrain": 0.01,
-}
-# MIN_LR = 1e-4
-MIN_LR = 1e-3
-MIN_LRS: Dict[str, float] = {
-    "b0": MIN_LR,
-    "b1": MIN_LR,
-    "b0-pretrain": MIN_LR,
-    "b1-pretrain": MIN_LR,
-}
-# fmt: on
 
 
 class GlobalAveragePooling(Module):
@@ -147,6 +129,27 @@ class CovidEfficientNet(Module):
 
 
 class CovidLightningEfficientNet(LightningModule):
+    # max_lr as determined by the LR range test (https://arxiv.org/pdf/1708.07120.pdf)
+    # note these were tested with a batch size of 128 and various regularization params:
+    #
+    # efficientnet-bX-pretrained/_LINEAR-TEST_lr-max=0.05@1500_L2=1.00e-05_128batch_crop+rflip+elstic
+    # fmt: off
+    MAX_LRS: Dict[str, float] = {
+        "b0": 0.01,
+        "b1": 0.01,
+        "b0-pretrain": 0.01,
+        "b1-pretrain": 0.01,
+    }
+    # MIN_LR = 1e-4
+    MIN_LR = 1e-3
+    MIN_LRS: Dict[str, float] = {
+        "b0": MIN_LR,
+        "b1": MIN_LR,
+        "b0-pretrain": MIN_LR,
+        "b1-pretrain": MIN_LR,
+    }
+    # fmt: on
+
     def __init__(self, hparams: Namespace, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
@@ -205,85 +208,10 @@ class CovidLightningEfficientNet(LightningModule):
         else:
             return Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
-    def cyclic_scheduling(self) -> Tuple[List[Optimizer], List[Dict[str, Union[CyclicLR, str]]]]:
-        # The problem with `triangular2` is it decays *way* too quickly.
-        optimizer = SGD(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        mode = self.params.cyclic_mode
-        mode_alts = {"tr": "triangular", "tr2": "triangular2", "gamma": "exp_range"}
-        mode = mode_alts[mode] if mode in mode_alts else mode
-        # lr_key = f"{self.params.version}{'-pretrain' if self.params.pretrain else ''}"
-        # max_lr = MAX_LRS[lr_key]
-        # base_lr = MIN_LRS[lr_key]
-        max_lr, base_lr = self.params.cyclic_max, self.params.cyclic_base
-        steps_per_epoch = trainloader_length(self.params.batch_size)
-        epochs = self.params.max_epochs
-        cycle_length = epochs / steps_per_epoch  # division by two makes us hit min FAST
-        stepsize_up = cycle_length // 2
-        # see lr_scheduling.py for motivation behind this
-        r = base_lr / max_lr
-        f = 60  # f == 1 means final max_lr is base_lr. f == 100 means triangular
-        gamma = np.exp(np.log(f * r) / epochs) if mode == "exp_range" else 1.0
-        stepsize_up = stepsize_up // 2 if mode == "exp_range" else stepsize_up
-        sched = CyclicLR(
-            optimizer,
-            base_lr=base_lr,
-            max_lr=max_lr,
-            mode=mode,
-            step_size_up=stepsize_up,
-            gamma=gamma,
-        )
-        scheduler: Dict[str, Union[CyclicLR, str]] = {"scheduler": sched, "interval": "step"}
-        return [optimizer], [scheduler]
-
-    def cosine_scheduling(self) -> Tuple[List[Optimizer], List[LRScheduler]]:
-        # optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        # scheduler = CosineAnnealingLR(optimizer, T_max=10)
-        # return [optimizer], [scheduler]
-        raise NotImplementedError("CosineAnnealingLR not implemented yet.")
-
-    def linear_test_scheduling(self) -> Tuple[List[Optimizer], List[LRScheduler]]:
-        optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        lr_min = self.params.lrtest_min
-        lr_max = self.params.lrtest_max
-        n_epochs = self.params.lrtest_epochs_to_max
-        lr_step = lr_max / n_epochs
-        scheduler = LambdaLR(
-            optimizer, lr_lambda=lambda epoch: (lr_min + epoch * lr_step) / self.lr  # type: ignore
-        )
-        return [optimizer], [scheduler]
-
-    def onecycle_scheduling(
-        self
-    ) -> Tuple[List[Optimizer], List[Dict[str, Union[LRScheduler, str]]]]:
-        # as per "Cyclical Learning Rates for Training Neural Networks" arXiv:1506.01186, and
-        # "Super-Convergence: Very Fast Training of NeuralNetworks", arXiv:1708.07120, we do a
-        # linear increase of the learning rate ("learning rate range test, LR range tst") for a
-        # few epochs and note how accuracy changes.
-        optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        lr_key = f"{self.params.version}{'-pretrain' if self.params.pretrain else ''}"
-        max_lr = MAX_LRS[lr_key]
-        # Below needs to be len(train_loader...) // batch_size. We also add 1 because there is
-        # clearly an implementation bug somewhere. See:
-        # https://discuss.pytorch.org/t/lr-scheduler-onecyclelr-causing-tried-to-step-57082-times-
-        # the-specified-number-of-total-steps-is-57080/90083/5
-        #
-        # or
-        #
-        # https://forums.pytorchlightning.ai/t/ lr-scheduler-onecyclelr-valueerror-tried-to-step-x-
-        # 2-times-the-specified-number-of-total-steps-is-x/259/3
-        steps = trainloader_length(self.params.batch_size)
-        scheduler = OneCycleLR(
-            optimizer,
-            max_lr=max_lr,
-            total_steps=None,
-            epochs=self.params.max_epochs,
-            pct_start=self.params.onecycle_pct,  # don't need large learning rate for too long
-            steps_per_epoch=steps + 1,  # lightning bug
-        )
-        # Ensure `scheduler.step()` is called after each batch, i.e.
-        # https://github.com/PyTorchLightning/pytorch-lightning/issues/1120#issuecomment-598331924
-        scheduler = {"scheduler": scheduler, "interval": "step"}
-        return [optimizer], [scheduler]
+    cyclic_scheduling = cyclic_scheduling
+    cosine_scheduling = cosine_scheduling
+    linear_test_scheduling = linear_test_scheduling
+    onecycle_scheduling = onecycle_scheduling
 
 
 def callbacks(hparams: Namespace) -> List[Callback]:
