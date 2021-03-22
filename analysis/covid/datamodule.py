@@ -55,8 +55,9 @@ class CovidCTDataModule(LightningDataModule):
     def train_dataloader(self, *args: Any, **kwargs: Any) -> DataLoader:
         return DataLoader(
             self.train,
-            batch_size=self.batch_size,
+            batch_size=self.batch_size,  # len(self.train) == 425
             num_workers=self.num_workers,
+            drop_last=True,
             pin_memory=True,
             shuffle=True,
         )
@@ -64,6 +65,7 @@ class CovidCTDataModule(LightningDataModule):
     def val_dataloader(self, *args: Any, **kwargs: Any) -> DataLoader:
         return DataLoader(
             self.val,
+            # batch_size=int(np.min([self.batch_size, len(self.val)])),  # val set is 118 images
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=True,
@@ -73,7 +75,8 @@ class CovidCTDataModule(LightningDataModule):
     def test_dataloader(self, *args: Any, **kwargs: Any) -> DataLoader:
         return DataLoader(
             self.test,
-            batch_size=self.batch_size,
+            # batch_size=int(np.min([self.batch_size, len(self.test)])),  # test set is 203 images
+            batch_size=1,  # test set is 203 images
             num_workers=self.num_workers,
             pin_memory=True,
             shuffle=False,

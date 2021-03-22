@@ -164,6 +164,10 @@ def to_numpy(normalization: str = "featurewise") -> Tuple[ndarray, ...]:
         x_train /= STD[np.newaxis, np.newaxis, :]
         x_val /= STD[np.newaxis, np.newaxis, :]
         x_test /= STD[np.newaxis, np.newaxis, :]
+        # to channels first
+        x_train = x_train.transpose([0, 3, 1, 2])
+        x_val = x_val.transpose([0, 3, 1, 2])
+        x_test = x_test.transpose([0, 3, 1, 2])
         return x_train, y_train, x_val, y_val, x_test, y_test
     else:
         raise ValueError("`normalization` must be one of 'resnet' or 'featurewise'.")

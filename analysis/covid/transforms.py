@@ -3,11 +3,12 @@ from typing import Callable, cast, Optional
 
 import sys
 import matplotlib.pyplot as plt
+from monai.transforms.utility.array import AddChannel, AsChannelFirst, AsChannelLast
 import numpy as np
 import torch
 from pathlib import Path
 from monai.transforms import Rand2DElastic as Elastic
-from monai.transforms import RandGaussianNoise, RandSpatialCrop, Resize
+from monai.transforms import RandGaussianNoise, RandSpatialCrop, Resize, SqueezeDim
 from torch import Tensor
 from torchvision.transforms import Compose
 from typing_extensions import Literal
@@ -20,13 +21,14 @@ Transform = Callable[[Tensor], Tensor]
 
 RESIZE = 224
 ELASTIC_ARGS_DEFAULT = dict(
-    spacing=0.5,
+    spacing=(0.5, 0.5),
     magnitude_range=(0.01, 0.2),
     prob=1.0,
     rotate_range=np.pi / 40,  # radians
     shear_range=0.1,
     translate_range=(0.3, 0.3),
     # scale_range=(0.1, 0.1),
+    spatial_size=(-1, -1),  # keep size the same
     scale_range=(0.2, 0.2),
     padding_mode="reflection",
 )
@@ -48,6 +50,7 @@ class RandomHorizontalFlip:
 def get_transform(
     hparams: Namespace, subset: Literal["train", "validation", "val"]
 ) -> Optional[Transform]:
+    # note ResNet images are channels first
     rcrop = RandSpatialCrop(roi_size=RESIZE, random_center=True, random_size=False)
     if hparams.no_rand_crop and subset in ["validation", "val"]:
         return None
@@ -60,6 +63,8 @@ def get_transform(
         scale_range=(hparams.elastic_scale, hparams.elastic_scale),
     )
     elast = Elastic(**{**ELASTIC_ARGS_DEFAULT, **arg_overrides})
+    squee = SqueezeDim()  # monai annoyances
+    expnd = AddChannel()  # monai annoyances
     train_transforms = list(
         filter(
             lambda t: t is not None,
@@ -67,11 +72,16 @@ def get_transform(
                 rcrop if not hparams.no_rand_crop else None,
                 rflip if not hparams.no_flip else None,
                 noise if hparams.noise else None,
+                squee if hparams.resnet else None,  # remove 1 batch dim
                 elast if not hparams.no_elastic else None,
+                expnd if hparams.resnet else None,  # add back 1 bactch dim
             ],
         )
     )
-    val_transforms = [Resize(spatial_size=[RESIZE, RESIZE])]
+    if hparams.resnet:
+        val_transforms = [Resize(spatial_size=[-1, RESIZE, RESIZE])]
+    else:
+        val_transforms = [Resize(spatial_size=[RESIZE, RESIZE])]
     transform = Compose(train_transforms) if subset == "train" else Compose(val_transforms)
     return cast(Transform, transform)
 
@@ -96,7 +106,8 @@ def test_elastic() -> None:
     if x.ndim == 2:  # BW
         x = np.expand_dims(x, 0)
     elif x.ndim == 3 and x.shape[-1] == 3:  # color
-        x = x.transpose([2, 0, 1])  # monai needs (C, H, W)
+        pass
+        # x = x.transpose([2, 0, 1])  # monai needs (C, H, W)
         # x = x[0, :, :]
         # x = np.expand_dims(x, 0)
     fig, axes = plt.subplots(ncols=5, nrows=5)
@@ -106,9 +117,9 @@ def test_elastic() -> None:
             continue  # center of grid
         img = transform(x)
         if len(img.shape) == 3:
+            img *= STD[:, np.newaxis, np.newaxis]
+            img += MEAN[:, np.newaxis, np.newaxis]
             img = img.transpose([1, 2, 0])  # imshow needs (H, W, C)
-            img *= STD[np.newaxis, np.newaxis, :]
-            img += MEAN[np.newaxis, np.newaxis, :]
             axes.flat[i].imshow(img)
         else:
             axes.flat[i].imshow(img.squeeze(), cmap="Greys")
