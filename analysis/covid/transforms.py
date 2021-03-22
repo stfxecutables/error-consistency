@@ -14,6 +14,7 @@ from typing_extensions import Literal
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from analysis.covid.arguments import EfficientNetArgs
+from analysis.covid.preprocessing import NUMPY_DATA_ROOT
 
 Transform = Callable[[Tensor], Tensor]
 
@@ -76,6 +77,10 @@ def get_transform(
 
 
 def test_elastic() -> None:
+    # Torch magic rescale values, e.g. in PyTorch ResNet documentation, or
+    # https://discuss.pytorch.org/t/how-to-preprocess-input-for-pre-trained-networks/683/26
+    MEAN = np.array([0.485, 0.456, 0.406])
+    STD = np.array([0.229, 0.224, 0.225])
     hparams = EfficientNetArgs.defaults()
     arg_overrides = dict(
         rotate_range=hparams.elastic_degree * np.pi / 180,
@@ -85,19 +90,36 @@ def test_elastic() -> None:
     )
     args = {**ELASTIC_ARGS_DEFAULT, **arg_overrides}
     transform = Elastic(**args)
-    data = np.load("/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_test.npy")
+    data = np.load(str(NUMPY_DATA_ROOT / "x_test.npy"))
     idx = np.random.randint(0, len(data))
-    x = np.load("/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_test.npy")[idx]
-    x = np.expand_dims(x, 0)
+    x = np.load(str(NUMPY_DATA_ROOT / "x_test.npy"))[idx]
+    if x.ndim == 2:  # BW
+        x = np.expand_dims(x, 0)
+    elif x.ndim == 3 and x.shape[-1] == 3:  # color
+        x = x.transpose([2, 0, 1])  # monai needs (C, H, W)
+        # x = x[0, :, :]
+        # x = np.expand_dims(x, 0)
     fig, axes = plt.subplots(ncols=5, nrows=5)
     center = 12
     for i in range(25):
         if i == center:
             continue  # center of grid
         img = transform(x)
-        axes.flat[i].imshow(img.squeeze(), cmap="Greys")
+        if len(img.shape) == 3:
+            img = img.transpose([1, 2, 0])  # imshow needs (H, W, C)
+            img *= STD[np.newaxis, np.newaxis, :]
+            img += MEAN[np.newaxis, np.newaxis, :]
+            axes.flat[i].imshow(img)
+        else:
+            axes.flat[i].imshow(img.squeeze(), cmap="Greys")
         # axes.flat[i].set_title("Elastic Deformed")
-    axes.flat[center].imshow(x.squeeze(), cmap="Greys")
+    if len(x.shape) == 3:
+        img = x.transpose([1, 2, 0])  # imshow needs (H, W, C)
+        img *= STD[np.newaxis, np.newaxis, :]
+        img += MEAN[np.newaxis, np.newaxis, :]
+        axes.flat[center].imshow(img)
+    else:
+        axes.flat[center].imshow(img.squeeze(), cmap="Greys")
     axes.flat[center].set_title(f"Original image {idx}")
     fig.set_size_inches(w=16, h=18)
     fig.subplots_adjust(hspace=0.3, wspace=0.1)
