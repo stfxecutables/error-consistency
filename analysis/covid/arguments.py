@@ -1,8 +1,94 @@
+import os
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from typing import cast, no_type_check
 from typing_extensions import Literal
+
+IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
+ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
+# https://pytorch.org/hub/pytorch_vision_resnet/ default=18,
+LR_CHOICES = ["cosine", "cyclic", "linear-test", "one-cycle", "none", "None"]
+CYCLIC_CHOICES = ["tr", "triangular", "triangular2", "tr2", "gamma", "exp_range"]
+EFFNET_CHOICES = [f"b{i}" for i in range(8)]
+RESNET_CHOICES = [18, 34, 50, 101, 152]
+
+PROG_ARGS: Dict[str, Dict] = {
+    "--batch-size": dict(type=int, default=40),
+    "--num-workers": dict(type=int, default=6),
+    "--max-epochs": dict(type=int, default=1000),
+}
+
+MODEL_ARGS: Dict[str, Dict] = {
+    "--pretrain": dict(action="store_true"),  # i.e. do pre-train if flag
+    "--initial-lr": dict(type=float, default=0.001),
+    "--weight-decay": dict(type=float, default=0.00001),
+}
+
+LR_ARGS: Dict[str, Dict] = {
+    "--lr-schedule": dict(choices=LR_CHOICES),
+    "--onecycle-pct": dict(type=float, default=0.05),
+    "--lrtest-min": dict(type=float, default=1e-6),
+    "--lrtest-max": dict(type=float, default=0.05),
+    "--lrtest-epochs-to-max": dict(type=float, default=1500),
+    "--cyclic-mode": dict(choices=CYCLIC_CHOICES, default="gamma"),
+    "--cyclic-max": dict(type=float, default=0.01),
+    "--cyclic-base": dict(type=float, default=1e-4),
+    "--cyclic-f": dict(type=int, default=60),
+}
+
+AUG_ARGS: Dict[str, Dict] = {
+    "--dropout": dict(type=float, default=0.2),
+    "--elastic-scale": dict(type=float, default=0.1),
+    "--elastic-trans": dict(type=float, default=0.3),
+    "--elastic-shear": dict(type=float, default=0.1),
+    "--elastic-degree": dict(type=float, default=5),
+    "--no-elastic": dict(action="store_true"),
+    "--no-rand-crop": dict(action="store_true"),
+    "--no-flip": dict(action="store_true"),
+    "--noise": dict(action="store_true"),
+}
+
+TUNABLE_PARAMS = (
+    ["--batch-size"] + list(MODEL_ARGS.keys()) + list(LR_ARGS.keys()) + list(AUG_ARGS.keys())
+)
+TUNABLE_PARAMS = list(map(lambda s: s.replace("--", "").replace("-", "_"), TUNABLE_PARAMS))
+
+
+def get_log_params(config: Dict[str, Any]) -> List[str]:
+    tunable = ["version"]
+    tunable.extend(list(PROG_ARGS.keys()))
+    tunable.extend(list(MODEL_ARGS.keys()))
+    lr_schedule = config["lr_schedule"]
+    if lr_schedule in ["None", "none", None]:
+        pass
+    elif lr_schedule == "cyclic":
+        args = list(LR_ARGS.keys())
+        tunable.extend(list(filter(lambda s: "cyclic" in s, args)))
+    elif lr_schedule == "linear-test":
+        args = list(LR_ARGS.keys())
+        tunable.extend(list(filter(lambda s: "lrtest" in s, args)))
+    elif lr_schedule == "one-cycle":
+        tunable.extend(["onecycle-pct"])
+    else:
+        raise ValueError("Unknown / unimplemented lr_schedule.")
+    tunable.extend(list(AUG_ARGS.keys()))
+    tunable = list(map(lambda s: s.replace("--", "").replace("-", "_"), tunable))
+    return tunable
+
+
+def get_analysis_params() -> List[str]:
+    config_tunable = [f"config.{param}" for param in TUNABLE_PARAMS]
+    config_tunable = list(filter(lambda p: "lrtest" not in p, config_tunable))
+    return [
+        "date",
+        "val_acc",
+        "val_loss",
+        "epoch",
+        "training_iteration",
+        *config_tunable,
+        "time_total_s",
+    ]
 
 
 class EfficientNetArgs:
@@ -10,45 +96,21 @@ class EfficientNetArgs:
     def program_level_parser() -> ArgumentParser:
         parser = ArgumentParser()
         # program args
-        parser.add_argument(
-            "--version", type=str, choices=[f"b{i}" for i in range(8)], default="b0"
-        )
-        parser.add_argument("--batch-size", type=int, default=40)
-        parser.add_argument("--num-workers", type=int, default=6)
-        parser.add_argument("--max-epochs", type=int, default=5000)
+        parser.add_argument("--version", type=str, choices=EFFNET_CHOICES, default="b0")
+        for argname, kwargs in PROG_ARGS.items():
+            parser.add_argument(argname, **kwargs)
         return parser
 
     @staticmethod
     def add_model_specific_args(parser: ArgumentParser) -> ArgumentParser:
         # model-specific args
-        lr_choices = ["cosine", "cyclic", "linear-test", "one-cycle", "none", "None"]
-        cyclic_choices = ["tr", "triangular", "triangular2", "tr2", "gamma", "exp_range"]
         parser = ArgumentParser(parents=[parser], add_help=False)
-        parser.add_argument("--pretrain", action="store_true")  # i.e. do pre-train if flag
-        parser.add_argument("--initial-lr", type=float, default=0.001)
-        parser.add_argument("--weight-decay", type=float, default=0.00001)
-
-        # learning rate args
-        parser.add_argument("--lr-schedule", choices=lr_choices)
-        parser.add_argument("--onecycle-pct", type=float, default=0.05)
-        parser.add_argument("--lrtest-min", type=float, default=1e-6)
-        parser.add_argument("--lrtest-max", type=float, default=0.05)
-        parser.add_argument("--lrtest-epochs-to-max", type=float, default=1500)
-        parser.add_argument("--cyclic-mode", choices=cyclic_choices, default="gamma")
-        parser.add_argument("--cyclic-max", type=float, default=0.01)
-        parser.add_argument("--cyclic-base", type=float, default=1e-4)
-        parser.add_argument("--cyclic-f", type=int, default=60)
-
-        # augmentation params
-        parser.add_argument("--dropout", type=float, default=0.2)
-        parser.add_argument("--elastic-scale", type=float, default=0.1)
-        parser.add_argument("--elastic-trans", type=float, default=0.3)
-        parser.add_argument("--elastic-shear", type=float, default=0.1)
-        parser.add_argument("--elastic-degree", type=float, default=5)
-        parser.add_argument("--no-elastic", action="store_true")
-        parser.add_argument("--no-rand-crop", action="store_true")
-        parser.add_argument("--no-flip", action="store_true")
-        parser.add_argument("--noise", action="store_true")
+        for argname, kwargs in MODEL_ARGS.items():
+            parser.add_argument(argname, **kwargs)
+        for argname, kwargs in LR_ARGS.items():
+            parser.add_argument(argname, **kwargs)
+        for argname, kwargs in AUG_ARGS.items():
+            parser.add_argument(argname, **kwargs)
         return parser
 
     @staticmethod
@@ -122,51 +184,21 @@ class ResNetArgs:
     @staticmethod
     def program_level_parser() -> ArgumentParser:
         parser = ArgumentParser()
-        # program args
-
-        parser.add_argument(
-            "--version",
-            type=int,
-            choices=[18, 34, 50, 101, 152],  # https://pytorch.org/hub/pytorch_vision_resnet/
-            default=18,
-        )
+        parser.add_argument("--version", type=int, choices=RESNET_CHOICES, default=18)
         parser.add_argument("--resnet", type=bool, default=True)
-        parser.add_argument("--batch-size", type=int, default=40)
-        parser.add_argument("--num-workers", type=int, default=6)
-        parser.add_argument("--max-epochs", type=int, default=5000)
+        for argname, kwargs in PROG_ARGS.items():
+            parser.add_argument(argname, **kwargs)
         return parser
 
     @staticmethod
     def add_model_specific_args(parser: ArgumentParser) -> ArgumentParser:
-        # model-specific args
-        lr_choices = ["cosine", "cyclic", "linear-test", "one-cycle", "none", "None"]
-        cyclic_choices = ["tr", "triangular", "triangular2", "tr2", "gamma", "exp_range"]
         parser = ArgumentParser(parents=[parser], add_help=False)
-        parser.add_argument("--pretrain", action="store_true")  # i.e. do pre-train if flag
-        parser.add_argument("--initial-lr", type=float, default=0.001)
-        parser.add_argument("--weight-decay", type=float, default=0.00001)
-
-        # learning rate args
-        parser.add_argument("--lr-schedule", choices=lr_choices)
-        parser.add_argument("--onecycle-pct", type=float, default=0.05)
-        parser.add_argument("--lrtest-min", type=float, default=1e-6)
-        parser.add_argument("--lrtest-max", type=float, default=0.05)
-        parser.add_argument("--lrtest-epochs-to-max", type=float, default=1500)
-        parser.add_argument("--cyclic-mode", choices=cyclic_choices, default="gamma")
-        parser.add_argument("--cyclic-max", type=float, default=0.01)
-        parser.add_argument("--cyclic-base", type=float, default=1e-4)
-        parser.add_argument("--cyclic-f", type=int, default=60)
-
-        # augmentation params
-        parser.add_argument("--dropout", type=float, default=0.2)
-        parser.add_argument("--elastic-scale", type=float, default=0.1)
-        parser.add_argument("--elastic-trans", type=float, default=0.3)
-        parser.add_argument("--elastic-shear", type=float, default=0.1)
-        parser.add_argument("--elastic-degree", type=float, default=5)
-        parser.add_argument("--no-elastic", action="store_true")
-        parser.add_argument("--no-rand-crop", action="store_true")
-        parser.add_argument("--no-flip", action="store_true")
-        parser.add_argument("--noise", action="store_true")
+        for argname, kwargs in MODEL_ARGS.items():
+            parser.add_argument(argname, **kwargs)
+        for argname, kwargs in LR_ARGS.items():
+            parser.add_argument(argname, **kwargs)
+        for argname, kwargs in AUG_ARGS.items():
+            parser.add_argument(argname, **kwargs)
         return parser
 
     @staticmethod
@@ -178,10 +210,12 @@ class ResNetArgs:
     @staticmethod
     def info_from_args(args: Union[Namespace, Dict[str, Any]], info: str) -> str:
         if isinstance(args, dict):
-            class Dummy():
+
+            class Dummy:
                 def __init__(self, args: Dict[str, Any]) -> None:
                     for key, val in args.items():
                         setattr(self, key, val)
+
             hp: Any = Dummy(args)
         else:
             hp = args
