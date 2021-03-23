@@ -1,5 +1,8 @@
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import cast, no_type_check
+from typing_extensions import Literal
 
 
 class EfficientNetArgs:
@@ -173,8 +176,15 @@ class ResNetArgs:
         return parser.parse_args()
 
     @staticmethod
-    def info_from_args(args: Namespace, info: str) -> str:
-        hp = args
+    def info_from_args(args: Union[Namespace, Dict[str, Any]], info: str) -> str:
+        if isinstance(args, dict):
+            class Dummy():
+                def __init__(self, args: Dict[str, Any]) -> None:
+                    for key, val in args.items():
+                        setattr(self, key, val)
+            hp: Any = Dummy(args)
+        else:
+            hp = args
         ver = hp.version
         pre = "-pretrained" if hp.pretrain else ""
 

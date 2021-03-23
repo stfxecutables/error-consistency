@@ -1,5 +1,17 @@
 from argparse import Namespace
 from typing import Callable, cast, Optional
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import cast, no_type_check
+from typing_extensions import Literal
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import pytest
+import seaborn as sbn
+from numpy import ndarray
+from pandas import DataFrame, Series
 
 import sys
 import matplotlib.pyplot as plt
@@ -48,19 +60,19 @@ class RandomHorizontalFlip:
 
 
 def get_transform(
-    hparams: Namespace, subset: Literal["train", "validation", "val"]
+    hparams: Dict[str, Any], subset: Literal["train", "validation", "val"]
 ) -> Optional[Transform]:
     # note ResNet images are channels first
     rcrop = RandSpatialCrop(roi_size=RESIZE, random_center=True, random_size=False)
-    if hparams.no_rand_crop and subset in ["validation", "val"]:
+    if hparams["no_rand_crop"] and subset in ["validation", "val"]:
         return None
     rflip = RandomHorizontalFlip(p=0.3, spatial_axis=-1)
     noise = RandGaussianNoise(prob=0.2)
     arg_overrides = dict(
-        rotate_range=hparams.elastic_degree * np.pi / 180,
-        shear_range=hparams.elastic_shear,
-        translate_range=(hparams.elastic_trans, hparams.elastic_trans),
-        scale_range=(hparams.elastic_scale, hparams.elastic_scale),
+        rotate_range=hparams["elastic_degree"] * np.pi / 180,
+        shear_range=hparams["elastic_shear"],
+        translate_range=(hparams["elastic_trans"], hparams["elastic_trans"]),
+        scale_range=(hparams["elastic_scale"], hparams["elastic_scale"]),
     )
     elast = Elastic(**{**ELASTIC_ARGS_DEFAULT, **arg_overrides})
     squee = SqueezeDim()  # monai annoyances
@@ -69,16 +81,16 @@ def get_transform(
         filter(
             lambda t: t is not None,
             [
-                rcrop if not hparams.no_rand_crop else None,
-                rflip if not hparams.no_flip else None,
-                noise if hparams.noise else None,
-                squee if hparams.resnet else None,  # remove 1 batch dim
-                elast if not hparams.no_elastic else None,
-                expnd if hparams.resnet else None,  # add back 1 bactch dim
+                rcrop if not hparams["no_rand_crop"] else None,
+                rflip if not hparams["no_flip"] else None,
+                noise if hparams["noise"] else None,
+                squee if hparams["resnet"] else None,  # remove 1 batch dim
+                elast if not hparams["no_elastic"] else None,
+                expnd if hparams["resnet"] else None,  # add back 1 bactch dim
             ],
         )
     )
-    if hparams.resnet:
+    if hparams["resnet"]:
         val_transforms = [Resize(spatial_size=[-1, RESIZE, RESIZE])]
     else:
         val_transforms = [Resize(spatial_size=[RESIZE, RESIZE])]
@@ -93,10 +105,10 @@ def test_elastic() -> None:
     STD = np.array([0.229, 0.224, 0.225])
     hparams = EfficientNetArgs.defaults()
     arg_overrides = dict(
-        rotate_range=hparams.elastic_degree * np.pi / 180,
-        shear_range=hparams.elastic_shear,
-        translate_range=(hparams.elastic_trans, hparams.elastic_trans),
-        scale_range=(hparams.elastic_scale, hparams.elastic_scale),
+        rotate_range=hparams["elastic_degree"] * np.pi / 180,
+        shear_range=hparams["elastic_shear"],
+        translate_range=(hparams["elastic_trans"], hparams["elastic_trans"]),
+        scale_range=(hparams["elastic_scale"], hparams["elastic_scale"]),
     )
     args = {**ELASTIC_ARGS_DEFAULT, **arg_overrides}
     transform = Elastic(**args)

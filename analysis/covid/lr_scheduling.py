@@ -63,7 +63,7 @@ def onecycle_scheduling(
     linear increase of the learning rate ("learning rate range test, LR range tst") for a
     few epochs and note how accuracy changes."""
     optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-    lr_key = f"{self.params.version}{'-pretrain' if self.params.pretrain else ''}"
+    lr_key = f"{self.params['version']}{'-pretrain' if self.params['pretrain'] else ''}"
     max_lr = self.MAX_LRS[lr_key]
     # Below needs to be len(train_loader...) // batch_size. We also add 1 because there is
     # clearly an implementation bug somewhere. See:
@@ -74,7 +74,7 @@ def onecycle_scheduling(
     #
     # https://forums.pytorchlightning.ai/t/ lr-scheduler-onecyclelr-valueerror-tried-to-step-x-
     # 2-times-the-specified-number-of-total-steps-is-x/259/3
-    steps = trainloader_length(self.params.batch_size)
+    steps = trainloader_length(self.params["batch_size"])
     scheduler = OneCycleLR(
         optimizer,
         max_lr=max_lr,
@@ -92,15 +92,15 @@ def onecycle_scheduling(
 def cyclic_scheduling(self: Any) -> Tuple[List[Optimizer], List[Dict[str, Union[CyclicLR, str]]]]:
     # The problem with `triangular2` is it decays *way* too quickly.
     optimizer = SGD(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-    mode = self.params.cyclic_mode
+    mode = self.params["cyclic_mode"]
     mode_alts = {"tr": "triangular", "tr2": "triangular2", "gamma": "exp_range"}
     mode = mode_alts[mode] if mode in mode_alts else mode
     # lr_key = f"{self.params.version}{'-pretrain' if self.params.pretrain else ''}"
     # max_lr = MAX_LRS[lr_key]
     # base_lr = MIN_LRS[lr_key]
-    max_lr, base_lr = self.params.cyclic_max, self.params.cyclic_base
-    steps_per_epoch = trainloader_length(self.params.batch_size)
-    epochs = self.params.max_epochs
+    max_lr, base_lr = self.params["cyclic_max"], self.params["cyclic_base"]
+    steps_per_epoch = trainloader_length(self.params["batch_size"])
+    epochs = self.params["max_epochs"]
     cycle_length = epochs / steps_per_epoch  # division by two makes us hit min FAST
     stepsize_up = cycle_length // 2
     # see lr_scheduling.py for motivation behind this
@@ -124,9 +124,9 @@ def cosine_scheduling(self: Any) -> Tuple[List[Optimizer], List[LRScheduler]]:
 
 def linear_test_scheduling(self: Any) -> Tuple[List[Optimizer], List[LRScheduler]]:
     optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-    lr_min = self.params.lrtest_min
-    lr_max = self.params.lrtest_max
-    n_epochs = self.params.lrtest_epochs_to_max
+    lr_min = self.params["lrtest_min"]
+    lr_max = self.params["lrtest_max"]
+    n_epochs = self.params["lrtest_epochs_to_max"]
     lr_step = lr_max / n_epochs
     scheduler = LambdaLR(
         optimizer, lr_lambda=lambda epoch: (lr_min + epoch * lr_step) / self.lr  # type: ignore

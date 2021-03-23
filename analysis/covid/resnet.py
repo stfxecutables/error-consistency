@@ -1,11 +1,15 @@
 import os
 import sys
+import ray
+import numpy as np
 from argparse import Namespace
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, no_type_check
+from ray.tune import report
 
 import torch
 import torchvision
+from torch.utils.data import TensorDataset, DataLoader
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.callbacks import (
     Callback,
@@ -22,7 +26,7 @@ from torch.optim.optimizer import Optimizer
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from analysis.covid.arguments import ResNetArgs
-from analysis.covid.datamodule import CovidCTDataModule
+from analysis.covid.datamodule import CovidCTDataModule, get_transform, CovidDataset, DATA
 from analysis.covid.lr_scheduling import (
     cosine_scheduling,
     cyclic_scheduling,
@@ -44,10 +48,10 @@ ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 # [0, 1] and then normalized using:
 # mean = [0.485, 0.456, 0.406] and std = [0.229, 0.224, 0.225].
 class CovidResNet(Module):
-    def __init__(self, hparams: Namespace) -> None:
+    def __init__(self, hparams: Dict[str, Any]) -> None:
         super().__init__()
-        version = hparams.version
-        pre = hparams.pretrain
+        version = hparams["version"]
+        pre = hparams["pretrain"]
         # ResNet output is [batch_size, 1000]
         self.model = torchvision.models.resnet18(pretrained=pre)
         # self.model = torch.hub.load("pytorch/vision:v0.9.0", f"resnet{version}", pretrained=pre)
@@ -83,14 +87,18 @@ class CovidLightningResNet(LightningModule):
     }
     # fmt: on
 
-    def __init__(self, hparams: Namespace, *args: Any, **kwargs: Any):
+    def __init__(self, config: Dict[str, Any], *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
-        self.model = CovidResNet(hparams)
-        self.params = hparams
-        self.lr = hparams.initial_lr
-        self.weight_decay = hparams.weight_decay
-        self.lr_schedule = hparams.lr_schedule
+        self.model = CovidResNet(config)
+        self.params = config
+        self.config = config
+        self.lr = config["initial_lr"]
+        self.weight_decay = config["weight_decay"]
+        self.lr_schedule = config["lr_schedule"]
+        self.train_data: TensorDataset = self._get_dataset("train")
+        self.val_data: TensorDataset = self._get_dataset("val")
+        self.test_data: TensorDataset = self._get_dataset("test")
 
     @no_type_check
     def forward(self, x: Tensor) -> Tensor:
@@ -99,15 +107,16 @@ class CovidLightningResNet(LightningModule):
     @no_type_check
     def training_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int):
         loss, acc = self.step_helper(batch, batch_idx)
-        self.log("train_loss", loss, prog_bar=True)
-        self.log("train_acc", acc, prog_bar=True)
+        self.log("train_loss", loss, prog_bar=False, sync_dist=True)
+        self.log("train_acc", acc, prog_bar=False, on_step=True, sync_dist=True)
         return loss
 
     @no_type_check
     def validation_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int):
         loss, acc = self.step_helper(batch, batch_idx)
-        self.log("val_loss", loss, prog_bar=True)
-        self.log("val_acc", acc, prog_bar=True)
+        self.log("val_loss", loss, prog_bar=True, sync_dist=True)
+        self.log("val_acc", acc, prog_bar=True, sync_dist=True)
+        report(training_iteration=batch_idx, val_acc=acc, val_loss=loss)
 
     @no_type_check
     def test_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int):
@@ -143,6 +152,66 @@ class CovidLightningResNet(LightningModule):
         else:
             return Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
+    @no_type_check
+    def prepare_data(self, *args, **kwargs):
+        return
+        self.train: TensorDataset = self._get_dataset("train")
+        self.val: TensorDataset = self._get_dataset("val")
+        self.test: TensorDataset = self._get_dataset("test")
+
+    @no_type_check
+    def setup(self, stage: str) -> None:
+        # see
+        # https://github.com/UCSD-AI4H/COVID-CT/blob/master/baseline%20methods/DenseNet169/DenseNet_predict.py#L79-L93
+        self.train_data: TensorDataset = self._get_dataset("train")
+        self.val_data: TensorDataset = self._get_dataset("val")
+        self.test_data: TensorDataset = self._get_dataset("test")
+
+    @no_type_check
+    def train_dataloader(self, *args: Any, **kwargs: Any) -> DataLoader:
+        return DataLoader(
+            self.train_data,
+            batch_size=self.config["batch_size"],  # len(self.train) == 425
+            num_workers=self.config["num_workers"],
+            drop_last=True,
+            pin_memory=True,
+            shuffle=True,
+        )
+
+    @no_type_check
+    def val_dataloader(self, *args: Any, **kwargs: Any) -> DataLoader:
+        return DataLoader(
+            self.val_data,
+            # batch_size=int(np.min([self.batch_size, len(self.val)])),  # val set is 118 images
+            batch_size=self.config["batch_size"],
+            num_workers=self.config["num_workers"],
+            pin_memory=True,
+            shuffle=False,
+        )
+
+    # def validation_epoch_end(self, outputs):
+    #     avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
+    #     avg_acc = torch.stack([x["val_acc"] for x in outputs]).mean()
+    #     self.log("ptl/val_loss", avg_loss)
+    #     self.log("ptl/val_acc", avg_acc)
+
+    @no_type_check
+    def test_dataloader(self, *args: Any, **kwargs: Any) -> DataLoader:
+        return DataLoader(
+            self.test_data,
+            # batch_size=int(np.min([self.batch_size, len(self.test)])),  # test set is 203 images
+            batch_size=1,  # test set is 203 images
+            num_workers=self.config["num_workers"],
+            pin_memory=True,
+            shuffle=False,
+        )
+
+    def _get_dataset(self, subset: str) -> CovidDataset:
+        transform = get_transform(self.config, subset)
+        x = torch.from_numpy(np.load(DATA / f"x_{subset}.npy")).unsqueeze(1)
+        y = torch.from_numpy(np.load(DATA / f"y_{subset}.npy")).unsqueeze(1).float()
+        return CovidDataset(x, y, transform)
+
     cyclic_scheduling = cyclic_scheduling
     cosine_scheduling = cosine_scheduling
     linear_test_scheduling = linear_test_scheduling
@@ -153,13 +222,13 @@ def callbacks(hparams: Namespace) -> List[Callback]:
     logdir = ResNetArgs.info_from_args(hparams, info="logpath")
     return [
         LearningRateMonitor(logging_interval="epoch"),
-        EarlyStopping("train_acc", min_delta=0.001, patience=300, mode="max"),
+        EarlyStopping("val_acc", min_delta=0.001, patience=30, mode="max"),
         ModelCheckpoint(
             dirpath=logdir,
             filename="{epoch}-{step}_{val_acc:.2f}_{train_acc:0.3f}",
             monitor="val_acc",
             save_last=True,
-            save_top_k=2,
+            save_top_k=1,
             mode="max",
             save_weights_only=False,
         ),
@@ -179,22 +248,34 @@ def trainer_defaults(hparams: Namespace) -> Dict:
     )
 
 
-if __name__ == "__main__":
-    torch.cuda.empty_cache()
+@ray.remote(num_gpus=0.333, max_calls=1)
+def train(config: Namespace) -> Dict:
+    dm = CovidCTDataModule(hparams=config)
+    model = CovidLightningResNet(hparams=config)
+    # if you read the source, the **kwargs in Trainer.from_argparse_args just call .update on an
+    # args dictionary, so you can override what you want with it
+    defaults = {**trainer_defaults(hparams=config), **dict(progress_bar_refresh_rate=0)}
+    trainer = Trainer.from_argparse_args(config, callbacks=callbacks(config), **defaults)
+    trainer.fit(model, datamodule=dm)
+    results = trainer.test(model, datamodule=dm)
+    return results[0]  # type: ignore
+
+
+@ray.remote
+def get_config() -> Namespace:
     parser = ResNetArgs.program_level_parser()
     parser = ResNetArgs.add_model_specific_args(parser)
     parser = Trainer.add_argparse_args(parser)
-    hparams = parser.parse_args()
+    hparams = parser.parse_args("")
+    hparams.batch_size = 32
+    hparams.max_epochs = 2
+    return hparams  # type: ignore
 
-    dm = CovidCTDataModule(hparams)
-    model = CovidLightningResNet(hparams)
-    # if you read the source, the **kwargs in Trainer.from_argparse_args just call .update on an
-    # args dictionary, so you can override what you want with it
-    trainer = Trainer.from_argparse_args(
-        hparams, callbacks=callbacks(hparams), **trainer_defaults(hparams)
-    )
-    trainer.fit(model, datamodule=dm)
-    results = trainer.test(model, datamodule=dm)
-    # we don't really need to print because tensorboard logs the test result
-    for key, val in results[0].items():
-        print(f"{key:>12}: {val:1.4f}")
+
+if __name__ == "__main__":
+    torch.cuda.empty_cache()
+    ray.init(num_cpus=6, num_gpus=1)
+    config = get_config.remote()
+    results = ray.get([train.remote(config) for _ in range(3)])
+    for result in results:
+        print(result)
