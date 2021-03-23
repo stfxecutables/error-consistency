@@ -35,9 +35,14 @@ class CovidDataset(Dataset):
 class CovidCTDataModule(LightningDataModule):
     def __init__(self, hparams: Namespace) -> None:
         super().__init__()
-        self.batch_size = hparams.batch_size
-        self.num_workers = hparams.num_workers
-        self.hparams = hparams
+        if isinstance(hparams, Namespace):
+            self.batch_size = hparams.batch_size
+            self.num_workers = hparams.num_workers
+            self.hparams = hparams
+        elif isinstance(hparams, dict):
+            self.batch_size = hparams["batch_size"]
+            self.num_workers = hparams["num_workers"]
+            self.hparams = hparams
 
     @no_type_check
     def prepare_data(self, *args, **kwargs):

@@ -34,6 +34,7 @@ from analysis.covid.lr_scheduling import (
     onecycle_scheduling,
 )
 from analysis.covid.custom_layers import GlobalAveragePooling
+from analysis.covid.arguments import to_namespace
 
 SIZE = (256, 256)
 
@@ -87,7 +88,7 @@ class CovidLightningResNet(LightningModule):
     }
     # fmt: on
 
-    def __init__(self, config: Dict[str, Any], *args: Any, **kwargs: Any):
+    def __init__(self, config: Dict[str, Any], ray=True, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
         self.model = CovidResNet(config)
@@ -96,6 +97,7 @@ class CovidLightningResNet(LightningModule):
         self.lr = config["initial_lr"]
         self.weight_decay = config["weight_decay"]
         self.lr_schedule = config["lr_schedule"]
+        self.ray = ray
         self.train_data: TensorDataset = self._get_dataset("train")
         self.val_data: TensorDataset = self._get_dataset("val")
         self.test_data: TensorDataset = self._get_dataset("test")
@@ -107,16 +109,25 @@ class CovidLightningResNet(LightningModule):
     @no_type_check
     def training_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int):
         loss, acc = self.step_helper(batch, batch_idx)
-        self.log("train_loss", loss, prog_bar=False, sync_dist=True)
-        self.log("train_acc", acc, prog_bar=False, on_step=True, sync_dist=True)
+        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
+        self.log("train_acc", acc, prog_bar=True, on_step=True, sync_dist=True)
         return loss
 
     @no_type_check
     def validation_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int):
         loss, acc = self.step_helper(batch, batch_idx)
+        epoch = int(self.current_epoch)
         self.log("val_loss", loss, prog_bar=True, sync_dist=True)
         self.log("val_acc", acc, prog_bar=True, sync_dist=True)
-        report(training_iteration=batch_idx, val_acc=acc, val_loss=loss)
+        self.log("epoch", epoch, sync_dist=True)
+        # report(training_iteration=batch_idx, val_acc=acc, val_loss=loss)
+        if self.ray:
+            report(
+                training_iteration=int(batch_idx),
+                epoch=epoch,
+                val_acc=acc.clone().detach().cpu().numpy(),
+                val_loss=loss.clone().detach().cpu().numpy(),
+            )
 
     @no_type_check
     def test_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int):
@@ -124,6 +135,11 @@ class CovidLightningResNet(LightningModule):
         loss, acc = self.step_helper(batch, batch_idx)
         self.log("test_loss", loss)
         self.log("test_acc", acc)
+        if self.ray:
+            report(
+                test_acc=acc.clone().detach().cpu().numpy(),
+                test_loss=loss.clone().detach().cpu().numpy(),
+            )
 
     @no_type_check
     def step_helper(self, batch: Tuple[Tensor, Tensor], batch_idx: int):
@@ -210,6 +226,8 @@ class CovidLightningResNet(LightningModule):
         transform = get_transform(self.config, subset)
         x = torch.from_numpy(np.load(DATA / f"x_{subset}.npy")).unsqueeze(1)
         y = torch.from_numpy(np.load(DATA / f"y_{subset}.npy")).unsqueeze(1).float()
+        if subset == "train":
+            print("Training number of samples:", len(x))
         return CovidDataset(x, y, transform)
 
     cyclic_scheduling = cyclic_scheduling
@@ -218,11 +236,11 @@ class CovidLightningResNet(LightningModule):
     onecycle_scheduling = onecycle_scheduling
 
 
-def callbacks(hparams: Namespace) -> List[Callback]:
-    logdir = ResNetArgs.info_from_args(hparams, info="logpath")
+def callbacks(config: Dict[str, Any]) -> List[Callback]:
+    logdir = ResNetArgs.info_from_args(config, info="logpath")
     return [
         LearningRateMonitor(logging_interval="epoch"),
-        EarlyStopping("val_acc", min_delta=0.001, patience=30, mode="max"),
+        EarlyStopping("val_acc", min_delta=0.001, patience=100, mode="max"),
         ModelCheckpoint(
             dirpath=logdir,
             filename="{epoch}-{step}_{val_acc:.2f}_{train_acc:0.3f}",
@@ -235,47 +253,43 @@ def callbacks(hparams: Namespace) -> List[Callback]:
     ]
 
 
-def trainer_defaults(hparams: Namespace) -> Dict:
-    logdir = ResNetArgs.info_from_args(hparams, info="logpath")
+def trainer_defaults(config: Dict[str, Any]) -> Dict:
+    logdir = ResNetArgs.info_from_args(config, info="logpath")
     refresh_rate = 0 if IN_COMPUTE_CANADA_JOB else None
-    max_epochs = 2000 if hparams.lr_schedule == "linear-test" else hparams.max_epochs
+    max_epochs = 2000 if config["lr_schedule"] == "linear-test" else config["max_epochs"]
     return dict(
         default_root_dir=logdir,
         progress_bar_refresh_rate=refresh_rate,
         gpus=1,
         max_epochs=max_epochs,
-        min_epochs=1000,
+        min_epochs=30,
     )
 
 
-@ray.remote(num_gpus=0.333, max_calls=1)
-def train(config: Namespace) -> Dict:
-    dm = CovidCTDataModule(hparams=config)
-    model = CovidLightningResNet(hparams=config)
+def train(config: Dict[str, Any]) -> Dict:
+    dm = CovidCTDataModule(config)
+    model = CovidLightningResNet(config, ray=False)
     # if you read the source, the **kwargs in Trainer.from_argparse_args just call .update on an
     # args dictionary, so you can override what you want with it
-    defaults = {**trainer_defaults(hparams=config), **dict(progress_bar_refresh_rate=0)}
-    trainer = Trainer.from_argparse_args(config, callbacks=callbacks(config), **defaults)
+    defaults = trainer_defaults(config)
+    trainer = Trainer.from_argparse_args(
+        to_namespace(config), callbacks=callbacks(config), **defaults
+    )
     trainer.fit(model, datamodule=dm)
     results = trainer.test(model, datamodule=dm)
     return results[0]  # type: ignore
 
 
-@ray.remote
-def get_config() -> Namespace:
+def get_config() -> Dict[str, Any]:
     parser = ResNetArgs.program_level_parser()
     parser = ResNetArgs.add_model_specific_args(parser)
     parser = Trainer.add_argparse_args(parser)
-    hparams = parser.parse_args("")
-    hparams.batch_size = 32
-    hparams.max_epochs = 2
-    return hparams  # type: ignore
+    hparams = parser.parse_args()
+    return hparams.__dict__  # type: ignore
 
 
 if __name__ == "__main__":
     torch.cuda.empty_cache()
-    ray.init(num_cpus=6, num_gpus=1)
-    config = get_config.remote()
-    results = ray.get([train.remote(config) for _ in range(3)])
-    for result in results:
-        print(result)
+    config = get_config()
+    result = train(config)
+    print(result)

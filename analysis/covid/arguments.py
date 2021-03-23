@@ -91,6 +91,13 @@ def get_analysis_params() -> List[str]:
     ]
 
 
+def to_namespace(config: Dict[str, Any]) -> Namespace:
+    ns: Namespace = Namespace.__new__(Namespace)
+    for key, val in config.items():
+        setattr(ns, key, val)
+    return ns
+
+
 class EfficientNetArgs:
     @staticmethod
     def program_level_parser() -> ArgumentParser:
