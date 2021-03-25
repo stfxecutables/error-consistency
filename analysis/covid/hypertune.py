@@ -1,10 +1,12 @@
 from warnings import filterwarnings
 import os
+import pandas as pd
 import sys
+
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, no_type_check
-from pathlib import Path
+from time import strftime
+from typing import Any, Dict, List
 from pandas import DataFrame
 
 import ray
@@ -12,9 +14,7 @@ from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.sample import loguniform
 from ray.tune.schedulers import AsyncHyperBandScheduler
-from ray.util.sgd.torch import TrainingOperator
-from ray.util.sgd import TorchTrainer
-from ray.tune.integration.pytorch_lightning import TuneReportCallback, TuneReportCheckpointCallback
+from ray.tune.integration.pytorch_lightning import TuneReportCallback
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import (
     Callback,
@@ -26,14 +26,14 @@ from torchvision.models import resnet18, resnet34, resnet50, resnet101, resnet15
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from analysis.covid.resnet import CovidLightningResNet
-from analysis.covid.arguments import (
-    CYCLIC_CHOICES,
-    ResNetArgs,
-    get_analysis_params,
-    get_log_params,
-    to_namespace,
-)
+from analysis.covid.arguments import CYCLIC_CHOICES, ResNetArgs, get_analysis_params, to_namespace
 from analysis.covid.datamodule import CovidCTDataModule
+
+RAY_RESULTS = Path(__file__).resolve().parent / "ray_results"
+RAY_RESULTS_ALL = RAY_RESULTS / "all_results_df.json"
+RAY_RESULTS_CURRENT = RAY_RESULTS / f"results_{strftime('%b%d-%Y-%H:%M')}.json"
+if not RAY_RESULTS.exists():
+    os.makedirs(RAY_RESULTS, exist_ok=True)
 
 IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
 ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
@@ -183,16 +183,17 @@ def tune_resnet(config: Dict[str, Any]) -> None:
     trainer.fit(model)
 
 
-# @ray.remote(num_gpus=0.333, max_calls=1)
+# @ray.remote(num_gpus=GPU, max_calls=1)
+# NOTE: maybe can use this later to get test results in parallel
 @ray.remote(max_calls=1)
 def test_acc(config: Namespace) -> Dict:
     dm = CovidCTDataModule(hparams=config)
     model = CovidLightningResNet(hparams=config)
     # if you read the source, the **kwargs in Trainer.from_argparse_args just call .update on an
     # args dictionary, so you can override what you want with it
-    defaults = {**trainer_defaults(hparams=config), **dict(progress_bar_refresh_rate=0)}
+    defaults = {**trainer_defaults(config), **dict(progress_bar_refresh_rate=0)}
     trainer = Trainer.from_argparse_args(config, callbacks=callbacks(config), **defaults)
-    trainer.fit(model, datamodule=dm)
+    # trainer.fit(model, datamodule=dm)
     results = trainer.test(model, datamodule=dm)
     return results[0]  # type: ignore
 
@@ -267,7 +268,7 @@ if __name__ == "__main__":
         progress_reporter=reporter,
         # stop={"training_iteration": 2},
         search_alg=None,  # use random search
-        num_samples=6,
+        num_samples=NUM_SAMPLES,
         verbose=1,
         config=config,
         # resume=True,
@@ -290,5 +291,20 @@ if __name__ == "__main__":
             }
         )
     )
-    print(results)
     ray.shutdown()
+
+    print(results)
+    results.to_json(RAY_RESULTS_CURRENT)
+    print(f"Saved results for current ASHA run to {RAY_RESULTS_CURRENT}")
+
+    if RAY_RESULTS_ALL.exists():
+        print("Found previous Ray results. Updating...")
+        prev_results = pd.read_json(RAY_RESULTS_ALL)
+        results = pd.concat([prev_results, results])
+        results.sort_values(by="acc", ascending=False, inplace=True)
+        results.to_json(RAY_RESULTS_ALL)
+    else:
+        print("No previous Ray results found. Saving current results...")
+        results.sort_values(by="acc", ascending=False, inplace=True)
+    print(f"Saved all results to {RAY_RESULTS_ALL}")
+
