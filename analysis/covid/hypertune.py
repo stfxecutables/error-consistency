@@ -207,7 +207,7 @@ def get_config() -> Dict:
     return hparams.__dict__  # type: ignore
 
 
-def predownload() -> ArgumentParser:
+def predownload() -> None:
     parser = ArgumentParser()
     parser.add_argument("--download", action="store_true")
     args = parser.parse_args()
@@ -215,7 +215,7 @@ def predownload() -> ArgumentParser:
         for model in [resnet18, resnet34, resnet50, resnet101, resnet152]:
             _ = model(pretrained=True)
             _ = model(pretrained=False)
-    sys.exit()
+        sys.exit()
 
 
 # Rapidly hits 80% test acc in like 20 epochs
