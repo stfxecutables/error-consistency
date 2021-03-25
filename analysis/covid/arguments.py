@@ -8,7 +8,7 @@ from typing_extensions import Literal
 IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
 ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 # https://pytorch.org/hub/pytorch_vision_resnet/ default=18,
-LR_CHOICES = ["cosine", "cyclic", "linear-test", "one-cycle", "none", "None"]
+LR_CHOICES = ["random", "cosine", "cyclic", "linear-test", "one-cycle", "none", "None"]
 CYCLIC_CHOICES = ["tr", "triangular", "triangular2", "tr2", "gamma", "exp_range"]
 EFFNET_CHOICES = [f"b{i}" for i in range(8)]
 RESNET_CHOICES = [18, 34, 50, 101, 152]
@@ -19,8 +19,15 @@ PROG_ARGS: Dict[str, Dict] = {
     "--max-epochs": dict(type=int, default=1000),
 }
 
-MODEL_ARGS: Dict[str, Dict] = {
+EFFNET_MODEL_ARGS: Dict[str, Dict] = {
     "--pretrain": dict(action="store_true"),  # i.e. do pre-train if flag
+    "--initial-lr": dict(type=float, default=0.001),
+    "--weight-decay": dict(type=float, default=0.00001),
+}
+
+RESNET_MODEL_ARGS: Dict[str, Dict] = {
+    "--pretrain": dict(action="store_true"),  # i.e. do pre-train if flag
+    "--output": dict(choices=["gap", "linear"], default="gap"),
     "--initial-lr": dict(type=float, default=0.001),
     "--weight-decay": dict(type=float, default=0.00001),
 }
@@ -28,12 +35,10 @@ MODEL_ARGS: Dict[str, Dict] = {
 LR_ARGS: Dict[str, Dict] = {
     "--lr-schedule": dict(choices=LR_CHOICES),
     "--onecycle-pct": dict(type=float, default=0.05),
-    "--lrtest-min": dict(type=float, default=1e-6),
-    "--lrtest-max": dict(type=float, default=0.05),
+    "--lr-min": dict(type=float, default=1e-5),
+    "--lr-max": dict(type=float, default=0.1),
     "--lrtest-epochs-to-max": dict(type=float, default=1500),
     "--cyclic-mode": dict(choices=CYCLIC_CHOICES, default="gamma"),
-    "--cyclic-max": dict(type=float, default=0.01),
-    "--cyclic-base": dict(type=float, default=1e-4),
     "--cyclic-f": dict(type=int, default=60),
 }
 
@@ -47,31 +52,19 @@ AUG_ARGS: Dict[str, Dict] = {
     "--no-rand-crop": dict(action="store_true"),
     "--no-flip": dict(action="store_true"),
     "--noise": dict(action="store_true"),
+    "--noise-sd": dict(type=float, default=0.5),
 }
 
 TUNABLE_PARAMS = (
-    ["--batch-size"] + list(MODEL_ARGS.keys()) + list(LR_ARGS.keys()) + list(AUG_ARGS.keys())
+    ["--batch-size"] + list(RESNET_MODEL_ARGS.keys()) + list(LR_ARGS.keys()) + list(AUG_ARGS.keys())
 )
 TUNABLE_PARAMS = list(map(lambda s: s.replace("--", "").replace("-", "_"), TUNABLE_PARAMS))
 
 
-def get_log_params(config: Dict[str, Any]) -> List[str]:
-    tunable = ["version"]
-    tunable.extend(list(PROG_ARGS.keys()))
-    tunable.extend(list(MODEL_ARGS.keys()))
-    lr_schedule = config["lr_schedule"]
-    if lr_schedule in ["None", "none", None]:
-        pass
-    elif lr_schedule == "cyclic":
-        args = list(LR_ARGS.keys())
-        tunable.extend(list(filter(lambda s: "cyclic" in s, args)))
-    elif lr_schedule == "linear-test":
-        args = list(LR_ARGS.keys())
-        tunable.extend(list(filter(lambda s: "lrtest" in s, args)))
-    elif lr_schedule == "one-cycle":
-        tunable.extend(["onecycle-pct"])
-    else:
-        raise ValueError("Unknown / unimplemented lr_schedule.")
+def get_log_params() -> List[str]:
+    tunable = ["--version", "--batch-size"]
+    tunable.extend(list(RESNET_MODEL_ARGS.keys()))
+    tunable.extend(list(LR_ARGS.keys()))
     tunable.extend(list(AUG_ARGS.keys()))
     tunable = list(map(lambda s: s.replace("--", "").replace("-", "_"), tunable))
     return tunable
@@ -112,7 +105,7 @@ class EfficientNetArgs:
     def add_model_specific_args(parser: ArgumentParser) -> ArgumentParser:
         # model-specific args
         parser = ArgumentParser(parents=[parser], add_help=False)
-        for argname, kwargs in MODEL_ARGS.items():
+        for argname, kwargs in EFFNET_MODEL_ARGS.items():
             parser.add_argument(argname, **kwargs)
         for argname, kwargs in LR_ARGS.items():
             parser.add_argument(argname, **kwargs)
@@ -149,8 +142,8 @@ class EfficientNetArgs:
                 m = "tr2"
             else:
                 m = "exp"
-            lr_max = hp.cyclic_max
-            lr_base = hp.cyclic_base
+            lr_max = hp.lr_max
+            lr_base = hp.lr_min
             f = hp.cyclic_f
             if mode in ["gamma", "exp_range"]:
                 lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e},f={f})"
@@ -200,7 +193,7 @@ class ResNetArgs:
     @staticmethod
     def add_model_specific_args(parser: ArgumentParser) -> ArgumentParser:
         parser = ArgumentParser(parents=[parser], add_help=False)
-        for argname, kwargs in MODEL_ARGS.items():
+        for argname, kwargs in RESNET_MODEL_ARGS.items():
             parser.add_argument(argname, **kwargs)
         for argname, kwargs in LR_ARGS.items():
             parser.add_argument(argname, **kwargs)
@@ -227,7 +220,9 @@ class ResNetArgs:
         else:
             hp = args
         ver = hp.version
-        pre = "-pretrained" if hp.pretrain else ""
+        pre = "-pre" if hp.pretrain else ""
+        out = "-lin" if hp.output == "linear" else "-GAP"
+        mdl = f"ResNet{ver}{out}{pre}"
 
         # learning rate-related
         sched = hp.lr_schedule
@@ -237,7 +232,7 @@ class ResNetArgs:
             sched = f"{sched}{hp.onecycle_pct:1.2f}"
         elif is_range_test:
             sched = str(sched).upper()
-            lr = f"lr-max={hp.lrtest_max}@{hp.lrtest_epochs_to_max}"
+            lr = f"lr-max={hp.lr_max}@{hp.lrtest_epochs_to_max}"
         elif sched == "cyclic":
             mode = hp.cyclic_mode
             if mode in ["tr", "triangular"]:
@@ -246,8 +241,8 @@ class ResNetArgs:
                 m = "tr2"
             else:
                 m = "exp"
-            lr_max = hp.cyclic_max
-            lr_base = hp.cyclic_base
+            lr_max = hp.lr_max
+            lr_base = hp.lr_min
             f = hp.cyclic_f
             if mode in ["gamma", "exp_range"]:
                 lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e},f={f})"
@@ -266,7 +261,8 @@ class ResNetArgs:
                 f"{elas}(sc={hp.elastic_scale}_tr={hp.elastic_trans}"
                 f"_sh={hp.elastic_shear}_deg={hp.elastic_degree})"
             )
-        noise = "noise" if hp.noise else ""
+        noise = f"noise{hp.noise_sd:1.1f}" if hp.noise else ""
+
         drop = f"drp{hp.dropout:0.1f}"
         augs = f"{crop}+{flip}+{elas}+{noise}+{drop}".replace("++", "+")
         if augs[-1] == "+":
@@ -275,9 +271,9 @@ class ResNetArgs:
             augs = augs[1:]
 
         if info == "scriptname":
-            return f"submit__ResNet{ver}{pre}_{sched}_{lr}_{wd}_{b}batch_{e}ep_{augs}.sh"
+            return f"submit__{mdl}_{sched}_{lr}_{wd}_{b}batch_{e}ep_{augs}.sh"
         elif info == "logpath":
-            version_dir = Path(__file__).resolve().parent / f"logs/ResNet{ver}{pre}/{sched}"
+            version_dir = Path(__file__).resolve().parent / f"logs/{mdl}/{sched}"
             dirname = f"{lr}_{wd}_{b}batch_{e}ep_{augs}"
             return str(version_dir / dirname)
         else:

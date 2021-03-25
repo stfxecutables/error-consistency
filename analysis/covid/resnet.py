@@ -9,6 +9,7 @@ from ray.tune import report
 
 import torch
 import torchvision
+from torch.nn import Linear, Dropout
 from torch.utils.data import TensorDataset, DataLoader
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.callbacks import (
@@ -32,6 +33,7 @@ from analysis.covid.lr_scheduling import (
     cyclic_scheduling,
     linear_test_scheduling,
     onecycle_scheduling,
+    random_scheduling,
 )
 from analysis.covid.custom_layers import GlobalAveragePooling
 from analysis.covid.arguments import to_namespace
@@ -40,6 +42,14 @@ SIZE = (256, 256)
 
 IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
 ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
+
+RESNETS = {
+    18: torchvision.models.resnet18,
+    34: torchvision.models.resnet34,
+    50: torchvision.models.resnet50,
+    101: torchvision.models.resnet101,
+    152: torchvision.models.resnet152,
+}
 
 
 # NOTE: For ResNet:
@@ -51,18 +61,20 @@ ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 class CovidResNet(Module):
     def __init__(self, hparams: Dict[str, Any]) -> None:
         super().__init__()
-        version = hparams["version"]
-        pre = hparams["pretrain"]
-        # ResNet output is [batch_size, 1000]
-        self.model = torchvision.models.resnet18(pretrained=pre)
-        # self.model = torch.hub.load("pytorch/vision:v0.9.0", f"resnet{version}", pretrained=pre)
-        self.output = GlobalAveragePooling()
-        # in_features = self._get_output_size()
-        # in_features = self._get_output_size()
-        # self.linear = Linear(in_features=in_features, out_features=1)
+        self.model = RESNETS[hparams["version"]](pretrained=hparams["pretrain"])
+        self.drop = Dropout(p=hparams["dropout"], inplace=True)
+        output = hparams["output"]
+        self.output_type = output
+        if output == "gap":
+            self.output = GlobalAveragePooling()
+        elif output == "linear":
+            self.output = Linear(1000, 1)  # ResNet outputs [batch_size, 1000]
 
     def forward(self, x: Tensor) -> Tensor:
         x = self.model(x)
+        x = self.drop(x)
+        if self.output_type == "linear":
+            x = x.squeeze()
         return self.output(x)  # type: ignore
 
 
@@ -88,7 +100,7 @@ class CovidLightningResNet(LightningModule):
     }
     # fmt: on
 
-    def __init__(self, config: Dict[str, Any], ray=True, *args: Any, **kwargs: Any):
+    def __init__(self, config: Dict[str, Any], use_ray: bool = True, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
         self.model = CovidResNet(config)
@@ -97,7 +109,7 @@ class CovidLightningResNet(LightningModule):
         self.lr = config["initial_lr"]
         self.weight_decay = config["weight_decay"]
         self.lr_schedule = config["lr_schedule"]
-        self.ray = ray
+        self.ray = use_ray
         self.train_data: TensorDataset = self._get_dataset("train")
         self.val_data: TensorDataset = self._get_dataset("val")
         self.test_data: TensorDataset = self._get_dataset("test")
@@ -109,8 +121,8 @@ class CovidLightningResNet(LightningModule):
     @no_type_check
     def training_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int):
         loss, acc = self.step_helper(batch, batch_idx)
-        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
-        self.log("train_acc", acc, prog_bar=True, on_step=True, sync_dist=True)
+        self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True, sync_dist=True)
+        self.log("train_acc", acc, prog_bar=True, on_step=True, on_epoch=True, sync_dist=True)
         return loss
 
     @no_type_check
@@ -119,7 +131,7 @@ class CovidLightningResNet(LightningModule):
         epoch = int(self.current_epoch)
         self.log("val_loss", loss, prog_bar=True, sync_dist=True)
         self.log("val_acc", acc, prog_bar=True, sync_dist=True)
-        self.log("epoch", epoch, sync_dist=True)
+        self.log("val_epoch", epoch, sync_dist=True)
         # report(training_iteration=batch_idx, val_acc=acc, val_loss=loss)
         if self.ray:
             report(
@@ -146,7 +158,10 @@ class CovidLightningResNet(LightningModule):
         x, y = batch
         x = x.squeeze(1)
         out = self(x)  # out of GAP layer
-        loss = Loss()(out.unsqueeze(1), y)
+        if self.model.output_type == "gap":
+            loss = Loss()(out.unsqueeze(1), y)
+        elif self.model.output_type == "linear":
+            loss = Loss()(out.squeeze(), y.squeeze())
         pred = torch.sigmoid(out)
         y_int = y.int()
         acc = accuracy(pred, y_int)
@@ -165,6 +180,9 @@ class CovidLightningResNet(LightningModule):
             return self.onecycle_scheduling()
         elif self.lr_schedule == "linear-test":
             return self.linear_test_scheduling()
+        elif self.lr_schedule == "random":
+            raise NotImplementedError()
+            return self.random_scheduling()
         else:
             return Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
@@ -178,7 +196,6 @@ class CovidLightningResNet(LightningModule):
     @no_type_check
     def setup(self, stage: str) -> None:
         # see
-        # https://github.com/UCSD-AI4H/COVID-CT/blob/master/baseline%20methods/DenseNet169/DenseNet_predict.py#L79-L93
         self.train_data: TensorDataset = self._get_dataset("train")
         self.val_data: TensorDataset = self._get_dataset("val")
         self.test_data: TensorDataset = self._get_dataset("test")
@@ -198,7 +215,6 @@ class CovidLightningResNet(LightningModule):
     def val_dataloader(self, *args: Any, **kwargs: Any) -> DataLoader:
         return DataLoader(
             self.val_data,
-            # batch_size=int(np.min([self.batch_size, len(self.val)])),  # val set is 118 images
             batch_size=self.config["batch_size"],
             num_workers=self.config["num_workers"],
             pin_memory=True,
@@ -215,7 +231,6 @@ class CovidLightningResNet(LightningModule):
     def test_dataloader(self, *args: Any, **kwargs: Any) -> DataLoader:
         return DataLoader(
             self.test_data,
-            # batch_size=int(np.min([self.batch_size, len(self.test)])),  # test set is 203 images
             batch_size=1,  # test set is 203 images
             num_workers=self.config["num_workers"],
             pin_memory=True,
@@ -234,12 +249,13 @@ class CovidLightningResNet(LightningModule):
     cosine_scheduling = cosine_scheduling
     linear_test_scheduling = linear_test_scheduling
     onecycle_scheduling = onecycle_scheduling
+    random_scheduling = random_scheduling
 
 
 def callbacks(config: Dict[str, Any]) -> List[Callback]:
     logdir = ResNetArgs.info_from_args(config, info="logpath")
-    return [
-        LearningRateMonitor(logging_interval="epoch"),
+    cbs = [
+        LearningRateMonitor(logging_interval="epoch") if config["lr_schedule"] else None,
         EarlyStopping("val_acc", min_delta=0.001, patience=100, mode="max"),
         ModelCheckpoint(
             dirpath=logdir,
@@ -251,6 +267,7 @@ def callbacks(config: Dict[str, Any]) -> List[Callback]:
             save_weights_only=False,
         ),
     ]
+    return list(filter(lambda c: c is not None, cbs))  # type: ignore
 
 
 def trainer_defaults(config: Dict[str, Any]) -> Dict:
@@ -266,9 +283,18 @@ def trainer_defaults(config: Dict[str, Any]) -> Dict:
     )
 
 
-def train(config: Dict[str, Any]) -> Dict:
+def get_config() -> Dict[str, Any]:
+    parser = ResNetArgs.program_level_parser()
+    parser = ResNetArgs.add_model_specific_args(parser)
+    parser = Trainer.add_argparse_args(parser)
+    hparams = parser.parse_args()
+    return hparams.__dict__  # type: ignore
+
+
+def train() -> Dict:
+    config = get_config()
     dm = CovidCTDataModule(config)
-    model = CovidLightningResNet(config, ray=False)
+    model = CovidLightningResNet(config, use_ray=False)
     # if you read the source, the **kwargs in Trainer.from_argparse_args just call .update on an
     # args dictionary, so you can override what you want with it
     defaults = trainer_defaults(config)
@@ -280,16 +306,7 @@ def train(config: Dict[str, Any]) -> Dict:
     return results[0]  # type: ignore
 
 
-def get_config() -> Dict[str, Any]:
-    parser = ResNetArgs.program_level_parser()
-    parser = ResNetArgs.add_model_specific_args(parser)
-    parser = Trainer.add_argparse_args(parser)
-    hparams = parser.parse_args()
-    return hparams.__dict__  # type: ignore
-
-
 if __name__ == "__main__":
     torch.cuda.empty_cache()
-    config = get_config()
-    result = train(config)
+    result = train()
     print(result)

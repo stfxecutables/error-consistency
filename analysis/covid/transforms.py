@@ -1,32 +1,20 @@
-from argparse import Namespace
-from typing import Callable, cast, Optional
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
-from typing import cast, no_type_check
-from typing_extensions import Literal
-
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import pytest
-import seaborn as sbn
-from numpy import ndarray
-from pandas import DataFrame, Series
-
 import sys
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional, cast
+
 import matplotlib.pyplot as plt
-from monai.transforms.utility.array import AddChannel, AsChannelFirst, AsChannelLast
 import numpy as np
 import torch
-from pathlib import Path
 from monai.transforms import Rand2DElastic as Elastic
 from monai.transforms import RandGaussianNoise, RandSpatialCrop, Resize, SqueezeDim
+from monai.transforms.utility.array import AddChannel
 from torch import Tensor
 from torchvision.transforms import Compose
+from tqdm import tqdm
 from typing_extensions import Literal
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-from analysis.covid.arguments import EfficientNetArgs
+from analysis.covid.arguments import EfficientNetArgs, ResNetArgs
 from analysis.covid.preprocessing import NUMPY_DATA_ROOT
 
 Transform = Callable[[Tensor], Tensor]
@@ -44,6 +32,8 @@ ELASTIC_ARGS_DEFAULT = dict(
     scale_range=(0.2, 0.2),
     padding_mode="reflection",
 )
+MEAN = np.array([0.485, 0.456, 0.406])
+STD = np.array([0.229, 0.224, 0.225])
 
 
 class RandomHorizontalFlip:
@@ -67,7 +57,7 @@ def get_transform(
     if hparams["no_rand_crop"] and subset in ["validation", "val"]:
         return None
     rflip = RandomHorizontalFlip(p=0.3, spatial_axis=-1)
-    noise = RandGaussianNoise(prob=0.2)
+    noise = RandGaussianNoise(prob=1.0, std=hparams["noise_sd"])
     arg_overrides = dict(
         rotate_range=hparams["elastic_degree"] * np.pi / 180,
         shear_range=hparams["elastic_shear"],
@@ -101,8 +91,6 @@ def get_transform(
 def test_elastic() -> None:
     # Torch magic rescale values, e.g. in PyTorch ResNet documentation, or
     # https://discuss.pytorch.org/t/how-to-preprocess-input-for-pre-trained-networks/683/26
-    MEAN = np.array([0.485, 0.456, 0.406])
-    STD = np.array([0.229, 0.224, 0.225])
     hparams = EfficientNetArgs.defaults()
     arg_overrides = dict(
         rotate_range=hparams["elastic_degree"] * np.pi / 180,
@@ -151,30 +139,77 @@ def test_elastic() -> None:
 
 
 def test_total() -> None:
-    hparams = EfficientNetArgs.defaults()
-    transform = get_transform(hparams, "train")  # type: ignore
+    # hparams = EfficientNetArgs.defaults()
+    hparams = ResNetArgs.defaults()
+    config = hparams.__dict__
+    config["noise"] = True
+    config["noise_sd"] = 0.5
+    transform: Callable = get_transform(config, "train")  # type: ignore
     data = np.load("/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_test.npy")
     idx = np.random.randint(0, len(data))
     x = np.load("/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_test.npy")[idx]
-    x = np.expand_dims(x, 0)
-    x = np.expand_dims(x, 0)
+    if x.ndim == 2:  # BW
+        x = np.expand_dims(x, 0)
+    # x = np.expand_dims(x, 0)
+    # x = np.expand_dims(x, 0)
     fig, axes = plt.subplots(ncols=5, nrows=5)
     center = 12
     for i in range(25):
         if i == center:
             continue  # center of grid
         img = transform(Tensor(x))
+        if len(img.shape) >= 2:
+            img = img.squeeze()
+            img *= STD[:, np.newaxis, np.newaxis]
+            img += MEAN[:, np.newaxis, np.newaxis]
+            img = img.transpose([1, 2, 0])  # imshow needs (H, W, C)
+            axes.flat[i].imshow(img)
+        else:
+            axes.flat[i].imshow(img.squeeze(), cmap="Greys")
         axes.flat[i].imshow(img.squeeze(), cmap="Greys")
         # axes.flat[i].set_title("Elastic Deformed")
-    axes.flat[center].imshow(x.squeeze(), cmap="Greys")
+    if len(x.shape) >= 2:
+        img = x.squeeze()
+        img *= STD[:, np.newaxis, np.newaxis]
+        img += MEAN[:, np.newaxis, np.newaxis]
+        img = img.transpose([1, 2, 0])  # imshow needs (H, W, C)
+        axes.flat[center].imshow(img)
+    else:
+        axes.flat[center].imshow(img.squeeze(), cmap="Greys")
     axes.flat[center].set_title(f"Original image {idx}")
     fig.set_size_inches(w=16, h=18)
     fig.subplots_adjust(hspace=0.3, wspace=0.1)
-    fig.suptitle(str(ELASTIC_ARGS_DEFAULT))
+    fig.suptitle(f"{ELASTIC_ARGS_DEFAULT}\nnoise sd={config['noise_sd']}")
     plt.show()
+
+
+def test_check_nans() -> None:
+    hparams = ResNetArgs.defaults()
+    config = hparams.__dict__
+    config["noise"] = True
+    config["noise_sd"] = 0.5
+    config["no_elastic"] = False
+    for subset in ["train", "test", "val"]:
+        transform: Callable = get_transform(config, subset)  # type: ignore
+        data = np.load(f"/home/derek/Desktop/error-consistency/tests/datasets/covid-ct/x_{subset}.npy")
+        for idx in tqdm(range(len(data)), total=len(data), desc=subset):
+            x = data[idx]
+            assert np.all(np.isfinite(x))
+            x = np.expand_dims(x, 0)
+            img = transform(Tensor(x))
+            if isinstance(img, Tensor):
+                img = img.numpy()
+
+            wtfs = np.isfinite(img)
+            try:
+                assert np.all(wtfs)
+            except AssertionError:
+                print(f"{np.sum(wtfs) / (np.prod(img.shape)) * 100}% non-numbers")
+                break
 
 
 if __name__ == "__main__":
     for _ in range(2):
-        test_elastic()
+        # test_elastic()
         # test_total()
+        test_check_nans()

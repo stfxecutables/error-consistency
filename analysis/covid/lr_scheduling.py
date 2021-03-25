@@ -20,7 +20,7 @@ from torch.utils.data import TensorDataset
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from analysis.covid.datamodule import trainloader_length
 
-EPOCHS = [1000, 2000, 3000, 4000, 5000]
+EPOCHS = [50, 100, 200, 500]
 LR0 = 0.01
 
 
@@ -38,7 +38,7 @@ class RandomLinearDecayingLR(_LRScheduler):
         self.eta_max = eta_max
         self.max_epochs = max_epochs
         # self.batch_size = batch_size
-        self.total_steps = trainloader_length(batch_size) * max_epochs
+        self.total_steps = trainloader_length(batch_size)  # * max_epochs
         super().__init__(optimizer, last_epoch=last_epoch)
 
     @no_type_check
@@ -98,7 +98,7 @@ def cyclic_scheduling(self: Any) -> Tuple[List[Optimizer], List[Dict[str, Union[
     # lr_key = f"{self.params.version}{'-pretrain' if self.params.pretrain else ''}"
     # max_lr = MAX_LRS[lr_key]
     # base_lr = MIN_LRS[lr_key]
-    max_lr, base_lr = self.params["cyclic_max"], self.params["cyclic_base"]
+    max_lr, base_lr = self.params["lr_max"], self.params["lr_min"]
     steps_per_epoch = trainloader_length(self.params["batch_size"])
     epochs = self.params["max_epochs"]
     cycle_length = epochs / steps_per_epoch  # division by two makes us hit min FAST
@@ -107,11 +107,29 @@ def cyclic_scheduling(self: Any) -> Tuple[List[Optimizer], List[Dict[str, Union[
     r = base_lr / max_lr
     f = 60  # f == 1 means final max_lr is base_lr. f == 100 means triangular
     gamma = np.exp(np.log(f * r) / epochs) if mode == "exp_range" else 1.0
-    stepsize_up = stepsize_up // 2 if mode == "exp_range" else stepsize_up
+    stepsize_up = stepsize_up // 2 if mode == "exp_range" else cycle_length // 2
     sched = CyclicLR(
         optimizer, base_lr=base_lr, max_lr=max_lr, mode=mode, step_size_up=stepsize_up, gamma=gamma
     )
     scheduler: Dict[str, Union[CyclicLR, str]] = {"scheduler": sched, "interval": "step"}
+    return [optimizer], [scheduler]
+
+
+def random_scheduling(
+    self: Any
+) -> Tuple[List[Optimizer], List[Dict[str, Union[RandomLinearDecayingLR, str]]]]:
+    optimizer = SGD(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+    sched = RandomLinearDecayingLR(
+        optimizer=optimizer,
+        eta_min=self.params["lr_min"],
+        eta_max=self.params["lr_max"],
+        max_epochs=self.params["max_epochs"],
+        batch_size=self.params["batch_size"],
+    )
+    scheduler: Dict[str, Union[RandomLinearDecayingLR, str]] = {
+        "scheduler": sched,
+        "interval": "step",
+    }
     return [optimizer], [scheduler]
 
 
@@ -124,8 +142,8 @@ def cosine_scheduling(self: Any) -> Tuple[List[Optimizer], List[LRScheduler]]:
 
 def linear_test_scheduling(self: Any) -> Tuple[List[Optimizer], List[LRScheduler]]:
     optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-    lr_min = self.params["lrtest_min"]
-    lr_max = self.params["lrtest_max"]
+    lr_min = self.params["lr_min"]
+    lr_max = self.params["lr_max"]
     n_epochs = self.params["lrtest_epochs_to_max"]
     lr_step = lr_max / n_epochs
     scheduler = LambdaLR(
@@ -237,7 +255,7 @@ def test_triangular_cyclic_values() -> None:
     plt.show()
 
 
-def test_gamma_cyclic_values() -> None:
+def test_gamma_cyclic_values(f: int = 60) -> None:
     BATCH_SIZE = 128
     sbn.set_style("darkgrid")
     fig, axes = plt.subplots(ncols=len(EPOCHS))
@@ -262,7 +280,7 @@ def test_gamma_cyclic_values() -> None:
         #
         #       gamma = np.exp(np.log(base_lr * 4 / max_lr)  / max_epochs)
         r = base_lr / max_lr
-        f = 60  # desired final max oscillation height times base_lr
+        # f = 60  # desired final max oscillation height times base_lr
         gamma = np.exp(np.log(f * r) / epochs)
         scheduler = torch.optim.lr_scheduler.CyclicLR(
             optimizer,
@@ -290,15 +308,14 @@ def test_gamma_cyclic_values() -> None:
     plt.show()
 
 
-def test_random_values() -> None:
+def test_random_values(min_lr: float = 1e-4, max_lr: float = 0.1) -> None:
     BATCH_SIZE = 128
     sbn.set_style("darkgrid")
     fig, axes = plt.subplots(ncols=len(EPOCHS), sharey=True)
     for i, epochs in enumerate(EPOCHS):
         model = Sequential(PReLU())
         trainloader_length(BATCH_SIZE)
-        base_lr = 1e-4
-        max_lr = 0.01
+        base_lr = min_lr
         optimizer = SGD(model.parameters(), lr=base_lr, weight_decay=1e-5)
         scheduler = RandomLinearDecayingLR(
             optimizer, eta_max=0.01, eta_min=1e-4, max_epochs=epochs, batch_size=BATCH_SIZE
@@ -330,6 +347,6 @@ if __name__ == "__main__":
     # plot_multiplicative_decay_function(0.01)
 
     # test_small_cyclic_values()
-    # test_gamma_cyclic_values()
+    # test_gamma_cyclic_values(f=10)
     # test_triangular_cyclic_values()
     test_random_values()
