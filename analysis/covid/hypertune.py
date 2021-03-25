@@ -233,7 +233,8 @@ if __name__ == "__main__":
         max_report_frequency=15,
     )
 
-    analysis = tune.run(
+    # avoid shadowing "analysis" folder
+    analysis_results = tune.run(
         tune.with_parameters(tune_resnet),
         # tune.with_parameters(train_resnet, num_epochs=10),
         resources_per_trial={"cpu": 2, "gpu": 0.333},
@@ -249,7 +250,7 @@ if __name__ == "__main__":
         config=config,
         # resume=True,
     )
-    results: DataFrame = analysis.results_df
+    results: DataFrame = analysis_results.results_df
     columns = list(filter(lambda col: "config." not in col, results.columns))
     results = (
         results.filter(items=get_analysis_params())
