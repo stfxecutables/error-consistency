@@ -209,6 +209,11 @@ def get_config() -> Dict:
 # python analysis/covid/resnet.py --batch-size=32 --version=18 --lr-schedule=None --initial-lr=1.4e-4 --lr-max=0.1 --lr-min=1e-5  --max-epochs=50 --weight-decay=0.006 --noise --noise-sd=0.5 --output=gap --dropout=0.8 --pretrain
 if __name__ == "__main__":
     # ray.init(num_cpus=6, num_gpus=1)
+    # see https://stackoverflow.com/questions/54338013/parallel-import-a-python-file-from-sibling-folder
+    # parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    parent_dir = str(Path(__file__).resolve().parent.parent.parent)
+    os.environ["PYTHONPATH"] = f"{parent_dir}:{os.environ.get('PYTHONPATH', '')}"
+
     config = get_config()
     ray.init()
     # fmt: off

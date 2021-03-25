@@ -1,6 +1,5 @@
 import os
 import sys
-import ray
 import numpy as np
 from argparse import Namespace
 from pathlib import Path
