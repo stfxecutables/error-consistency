@@ -37,6 +37,8 @@ from analysis.covid.datamodule import CovidCTDataModule
 
 IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
 ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
+GPU = 1 / 8 if ON_COMPUTE_CANADA else 1 / 3
+NUM_SAMPLES = 32 if ON_COMPUTE_CANADA else 6
 
 BASE_BATCHES = [4, 8, 16, 32, 64] if ON_COMPUTE_CANADA else [4, 8, 16, 32]
 BASE_LR_MIN, BASE_LR_MAX = 5e-6, 1e-1
@@ -245,7 +247,7 @@ if __name__ == "__main__":
     analysis_results = tune.run(
         tune.with_parameters(tune_resnet),
         # tune.with_parameters(train_resnet, num_epochs=10),
-        resources_per_trial={"cpu": 2, "gpu": 0.333},
+        resources_per_trial={"cpu": 2, "gpu": GPU},
         name="asha_test",
         metric="val_acc",
         mode="max",

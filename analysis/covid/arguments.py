@@ -1,3 +1,4 @@
+import numpy as np
 import os
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
@@ -256,14 +257,18 @@ class ResNetArgs:
         crop = "crop" if not hp.no_rand_crop else ""
         flip = "rflip" if not hp.no_flip else ""
         elas = "elst" if not hp.no_elastic else ""
+        scale = float(np.round(hp.elastic_scale, 3))
+        trans = float(np.round(hp.elastic_trans, 3))
+        shear = float(np.round(hp.elastic_shear, 3))
+        degree = int(np.round(hp.elastic_degree, 0))
         if elas != "":
             elas = (
-                f"{elas}(sc={hp.elastic_scale}_tr={hp.elastic_trans}"
-                f"_sh={hp.elastic_shear}_deg={hp.elastic_degree})"
+                f"{elas}(sc={scale:0.3f}_tr={trans:0.3f}"
+                f"_sh={shear:0.3f}_deg={degree:0.3f})"
             )
-        noise = f"noise{hp.noise_sd:1.1f}" if hp.noise else ""
+        noise = f"noise{hp.noise_sd:1.2f}" if hp.noise else ""
 
-        drop = f"drp{hp.dropout:0.1f}"
+        drop = f"drp{hp.dropout:0.2f}"
         augs = f"{crop}+{flip}+{elas}+{noise}+{drop}".replace("++", "+")
         if augs[-1] == "+":
             augs = augs[:-1]
