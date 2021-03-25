@@ -15,7 +15,8 @@ from typing_extensions import Literal
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from analysis.covid.arguments import EfficientNetArgs, ResNetArgs
-from analysis.covid.preprocessing import NUMPY_DATA_ROOT
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+NUMPY_DATA_ROOT = PROJECT_ROOT / "tests/datasets/covid-ct"
 
 Transform = Callable[[Tensor], Tensor]
 
