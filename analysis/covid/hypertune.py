@@ -1,7 +1,7 @@
 from warnings import filterwarnings
 import os
 import sys
-from argparse import Namespace
+from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, no_type_check
 from pathlib import Path
@@ -22,7 +22,7 @@ from pytorch_lightning.callbacks import (
     LearningRateMonitor,
     ModelCheckpoint,
 )
-
+from torchvision.models import resnet18, resnet34, resnet50, resnet101, resnet152
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from analysis.covid.resnet import CovidLightningResNet
@@ -207,12 +207,24 @@ def get_config() -> Dict:
     return hparams.__dict__  # type: ignore
 
 
+def predownload() -> ArgumentParser:
+    parser = ArgumentParser()
+    parser.add_argument("--download", action="store_true")
+    args = parser.parse_args()
+    if args.download:
+        for model in [resnet18, resnet34, resnet50, resnet101, resnet152]:
+            _ = model(pretrained=True)
+            _ = model(pretrained=False)
+    sys.exit()
+
+
 # Rapidly hits 80% test acc in like 20 epochs
 # python analysis/covid/resnet.py --batch-size=32 --version=18 --lr-schedule=None --initial-lr=1.4e-4 --lr-max=0.1 --lr-min=1e-5  --max-epochs=50 --weight-decay=0.006 --noise --noise-sd=0.5 --output=gap --dropout=0.8 --pretrain
 if __name__ == "__main__":
     # ray.init(num_cpus=6, num_gpus=1)
     # see https://stackoverflow.com/questions/54338013/parallel-import-a-python-file-from-sibling-folder
     # parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    predownload()
     parent_dir = str(Path(__file__).resolve().parent.parent.parent)
     os.environ["PYTHONPATH"] = f"{parent_dir}:{os.environ.get('PYTHONPATH', '')}"
 
