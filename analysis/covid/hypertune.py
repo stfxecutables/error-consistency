@@ -214,6 +214,9 @@ if __name__ == "__main__":
     parent_dir = str(Path(__file__).resolve().parent.parent.parent)
     os.environ["PYTHONPATH"] = f"{parent_dir}:{os.environ.get('PYTHONPATH', '')}"
 
+    # another hack, see https://github.com/ray-project/ray/issues/10995#issuecomment-698177711
+    os.environ["SLURM_JOB_NAME"] = "bash"
+
     config = get_config()
     ray.init()
     # fmt: off
