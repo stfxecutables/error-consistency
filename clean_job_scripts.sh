@@ -1,1 +1,1 @@
-fd --regex 'submit__eff' -x rm {} -v
+fd --no-ignore --regex 'submit__eff' -x rm {} -v
