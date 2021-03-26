@@ -9,7 +9,7 @@ from typing_extensions import Literal
 IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
 ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 # https://pytorch.org/hub/pytorch_vision_resnet/ default=18,
-LR_CHOICES = ["random", "cosine", "cyclic", "linear-test", "one-cycle", "none", "None"]
+LR_CHOICES = ["random", "cosine", "cyclic", "linear-test", "one-cycle", "step", "none", "None"]
 CYCLIC_CHOICES = ["tr", "triangular", "triangular2", "tr2", "gamma", "exp_range"]
 EFFNET_CHOICES = [f"b{i}" for i in range(8)]
 RESNET_CHOICES = [18, 34, 50, 101, 152]
@@ -262,10 +262,7 @@ class ResNetArgs:
         shear = float(np.round(hp.elastic_shear, 3))
         degree = int(np.round(hp.elastic_degree, 0))
         if elas != "":
-            elas = (
-                f"{elas}(sc={scale:0.3f}_tr={trans:0.3f}"
-                f"_sh={shear:0.3f}_deg={degree:0.3f})"
-            )
+            elas = f"{elas}(sc={scale:0.3f}_tr={trans:0.3f}" f"_sh={shear:0.3f}_deg={degree:0.3f})"
         noise = f"noise{hp.noise_sd:1.2f}" if hp.noise else ""
 
         drop = f"drp{hp.dropout:0.2f}"

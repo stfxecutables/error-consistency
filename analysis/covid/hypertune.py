@@ -29,9 +29,10 @@ from analysis.covid.resnet import CovidLightningResNet
 from analysis.covid.arguments import CYCLIC_CHOICES, ResNetArgs, get_analysis_params, to_namespace
 from analysis.covid.datamodule import CovidCTDataModule
 
+TIMESTAMP = strftime("%b%d-%Y-%H:%M")
 RAY_RESULTS = Path(__file__).resolve().parent / "ray_results"
 RAY_RESULTS_ALL = RAY_RESULTS / "all_results_df.json"
-RAY_RESULTS_CURRENT = RAY_RESULTS / f"results_{strftime('%b%d-%Y-%H:%M')}.json"
+RAY_RESULTS_CURRENT = RAY_RESULTS / f"results_{TIMESTAMP}.json"
 if not RAY_RESULTS.exists():
     os.makedirs(RAY_RESULTS, exist_ok=True)
 
@@ -41,7 +42,7 @@ GPU = 1 / 8 if ON_COMPUTE_CANADA else 1 / 3
 NUM_SAMPLES = 32 if ON_COMPUTE_CANADA else 6
 
 BASE_BATCHES = [4, 8, 16, 32, 64] if ON_COMPUTE_CANADA else [4, 8, 16, 32]
-BASE_LR_MIN, BASE_LR_MAX = 5e-6, 1e-1
+BASE_LR_MIN, BASE_LR_MAX = 1e-6, 1e-4
 BASE_LR_BOUNDARY = tune.loguniform(BASE_LR_MIN, BASE_LR_MAX).sample()
 BASE_CONFIG = dict(
     # basic / model
@@ -49,14 +50,14 @@ BASE_CONFIG = dict(
     batch_size=tune.choice(BASE_BATCHES),
     output=tune.choice(["gap", "linear"]),
     # learning rates
-    initial_lr=tune.loguniform(1e-5, 1e-1),
+    initial_lr=tune.loguniform(BASE_LR_MIN, BASE_LR_MAX),
     lr_min=tune.loguniform(BASE_LR_MIN, BASE_LR_BOUNDARY),
     lr_max=tune.loguniform(BASE_LR_BOUNDARY + BASE_LR_MIN, BASE_LR_MAX),
-    lr_schedule=tune.choice(["cyclic", "None"]),  # None is Adam
+    lr_schedule=tune.choice(["cyclic", "step", "None"]),  # None is Adam
     cyclic_mode=tune.choice(CYCLIC_CHOICES),
     cyclic_f=tune.qrandint(10, 100, 10),
     # regularization
-    weight_decay=tune.loguniform(1e-6, 1),
+    weight_decay=tune.loguniform(1e-6, 1.0),
     dropout=tune.quniform(0.05, 0.95, 0.05),
     # augments
     no_rand_crop=False,
@@ -244,7 +245,7 @@ if __name__ == "__main__":
     }
     # fmt: on
     scheduler = AsyncHyperBandScheduler(
-        time_attr="val_epoch", grace_period=25, max_t=101  # defined in `validation_step`
+        time_attr="val_epoch", grace_period=25, max_t=151  # defined in `validation_step`
     )
 
     reporter = CLIReporter(
@@ -261,7 +262,7 @@ if __name__ == "__main__":
         tune.with_parameters(tune_resnet),
         # tune.with_parameters(train_resnet, num_epochs=10),
         resources_per_trial={"cpu": 2, "gpu": GPU},
-        name="asha_test",
+        name=f"asha_test__{TIMESTAMP}",
         metric="val_acc",
         mode="max",
         scheduler=scheduler,
@@ -294,6 +295,7 @@ if __name__ == "__main__":
     ray.shutdown()
 
     print(results)
+    results.sort_values(by="val_acc", ascending=False, inplace=True)
     results.to_json(RAY_RESULTS_CURRENT)
     print(f"Saved results for current ASHA run to {RAY_RESULTS_CURRENT}")
 
@@ -301,10 +303,9 @@ if __name__ == "__main__":
         print("Found previous Ray results. Updating...")
         prev_results = pd.read_json(RAY_RESULTS_ALL)
         results = pd.concat([prev_results, results])
-        results.sort_values(by="acc", ascending=False, inplace=True)
-        results.to_json(RAY_RESULTS_ALL)
+        results.sort_values(by="val_acc", ascending=False, inplace=True)
     else:
         print("No previous Ray results found. Saving current results...")
-        results.sort_values(by="acc", ascending=False, inplace=True)
+    results.to_json(RAY_RESULTS_ALL)
     print(f"Saved all results to {RAY_RESULTS_ALL}")
 

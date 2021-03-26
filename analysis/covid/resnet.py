@@ -32,7 +32,7 @@ from analysis.covid.lr_scheduling import (
     cyclic_scheduling,
     linear_test_scheduling,
     onecycle_scheduling,
-    random_scheduling,
+    random_scheduling, step_scheduling,
 )
 from analysis.covid.custom_layers import GlobalAveragePooling
 from analysis.covid.arguments import to_namespace
@@ -179,6 +179,8 @@ class CovidLightningResNet(LightningModule):
             return self.onecycle_scheduling()
         elif self.lr_schedule == "linear-test":
             return self.linear_test_scheduling()
+        elif self.lr_schedule == "step":
+            return self.step_scheduling()
         elif self.lr_schedule == "random":
             raise NotImplementedError()
             return self.random_scheduling()
@@ -249,6 +251,7 @@ class CovidLightningResNet(LightningModule):
     linear_test_scheduling = linear_test_scheduling
     onecycle_scheduling = onecycle_scheduling
     random_scheduling = random_scheduling
+    step_scheduling = step_scheduling
 
 
 def callbacks(config: Dict[str, Any]) -> List[Callback]:

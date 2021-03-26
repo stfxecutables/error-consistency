@@ -1,6 +1,8 @@
 import sys
+import math
 import warnings
 from pathlib import Path
+from tqdm import tqdm
 from typing import Any, Dict, List, Tuple, Union, no_type_check
 
 import matplotlib.pyplot as plt
@@ -11,7 +13,7 @@ from numpy import ndarray
 from torch.nn import PReLU, Sequential
 from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import OneCycleLR  # type: ignore
-from torch.optim.lr_scheduler import CosineAnnealingLR, CyclicLR, LambdaLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, CyclicLR, LambdaLR, StepLR, ExponentialLR
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
 from torch.optim.optimizer import Optimizer
@@ -20,7 +22,7 @@ from torch.utils.data import TensorDataset
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from analysis.covid.datamodule import trainloader_length
 
-EPOCHS = [50, 100, 200, 500]
+EPOCHS = [100, 300]
 LR0 = 0.01
 
 
@@ -101,17 +103,34 @@ def cyclic_scheduling(self: Any) -> Tuple[List[Optimizer], List[Dict[str, Union[
     max_lr, base_lr = self.params["lr_max"], self.params["lr_min"]
     steps_per_epoch = trainloader_length(self.params["batch_size"])
     epochs = self.params["max_epochs"]
-    cycle_length = epochs / steps_per_epoch  # division by two makes us hit min FAST
-    stepsize_up = cycle_length // 2
+    total_steps = float(epochs * steps_per_epoch)
+    cycle_length = total_steps // 5
+    stepsize = cycle_length / 2.0
+    stepsize_up = int(np.max([1.0, stepsize / 5.0]))
+    stepsize_down = int(stepsize)
+    # cycle_length = epochs / steps_per_epoch  # division by two makes us hit min FAST
     # see lr_scheduling.py for motivation behind this
     r = base_lr / max_lr
     f = 60  # f == 1 means final max_lr is base_lr. f == 100 means triangular
     gamma = np.exp(np.log(f * r) / epochs) if mode == "exp_range" else 1.0
-    stepsize_up = stepsize_up // 2 if mode == "exp_range" else cycle_length // 2
+    # stepsize_up = stepsize_up // 2 if mode == "exp_range" else stepsize_up
     sched = CyclicLR(
-        optimizer, base_lr=base_lr, max_lr=max_lr, mode=mode, step_size_up=stepsize_up, gamma=gamma
+        optimizer,
+        base_lr=base_lr,
+        max_lr=max_lr,
+        mode=mode,
+        step_size_up=stepsize_up,
+        step_size_down=stepsize_down,
+        gamma=gamma,
     )
     scheduler: Dict[str, Union[CyclicLR, str]] = {"scheduler": sched, "interval": "step"}
+    return [optimizer], [scheduler]
+
+
+def step_scheduling(self: Any) -> Tuple[List[Optimizer], List[Dict[str, Union[StepLR, str]]]]:
+    optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+    sched = StepLR(optimizer=optimizer, step_size=75, gamma=0.5)
+    scheduler: Dict[str, Union[StepLR, str]] = {"scheduler": sched, "interval": "epoch"}
     return [optimizer], [scheduler]
 
 
@@ -175,21 +194,134 @@ def sig(x: ndarray) -> ndarray:
     return 1 / (1 + np.exp(-x))
 
 
-def plot_multiplicative_decay_function(lr0: float, epochs: List[int] = EPOCHS) -> ndarray:
+def plot_multiplicative_decay_function(
+    lr0: float, gamma: float = 1e-3, epochs: List[int] = EPOCHS
+) -> ndarray:
     sbn.set_style("darkgrid")
     fig, ax = plt.subplots()
-    for i, epoch in enumerate(epochs):
+    for i, epoch in enumerate(sorted(epochs)):
         e = np.arange(epoch)
-        lrs = lr0 * (1 - 1e-3) ** e
+        lrs = lr0 * (1 - gamma) ** e
         c = 1 - i / len(epochs)
         color = (c, c, c)
         # add a vertical shift for illustration only
-        sbn.lineplot(x=e, y=lrs + i * lr0, color=color, alpha=sig(sig(c)), label=epoch, ax=ax)
-    ax.set_title(f"Initial LR={lr0}")
+        sbn.lineplot(
+            x=e,
+            y=lrs + (len(epochs) - 1 - i) * lr0 / 10,
+            color=color,
+            alpha=sig(sig(c)),
+            label=epoch,
+            ax=ax,
+        )
+    ax.set_title(f"Initial LR={lr0}, gamma={gamma}")
     plt.show()
 
 
-def test_small_cyclic_values() -> None:
+def test_cyclic_values(
+    base_lr: float = 0.01, max_lr: float = 1e-4, mode="triangular2", gamma_sub: float = 1e-3
+) -> None:
+    BATCH_SIZES = [4, 8, 16, 32, 64]
+    sbn.set_style("darkgrid")
+    fig, axes = plt.subplots(ncols=len(EPOCHS), nrows=len(BATCH_SIZES))
+    for e, epochs in tqdm(enumerate(EPOCHS), total=len(EPOCHS)):
+        for b, batch_size in enumerate(BATCH_SIZES):
+            model = Sequential(PReLU())
+            optimizer = SGD(model.parameters(), lr=base_lr, weight_decay=1e-5)
+            steps_per_epoch = trainloader_length(batch_size)
+            total_steps = float(epochs * steps_per_epoch)
+            # cycle_length = epochs / (1 * steps_per_epoch)
+            # cycle_length = steps_per_epoch * 4 * np.log(steps_per_epoch)
+            cycle_length = total_steps / 5.0
+            stepsize = cycle_length / 2.0
+            stepsize_up = int(np.max([1.0, stepsize / 5.0]))
+            stepsize_down = stepsize
+            scheduler = CyclicLR(
+                optimizer,
+                base_lr=base_lr,
+                max_lr=max_lr,
+                mode=mode,
+                step_size_up=stepsize_up,
+                step_size_down=stepsize_down,
+                gamma=float(1.0 - gamma_sub),
+            )
+            lrs = [scheduler.get_last_lr()]  # type: ignore
+            es = [0]
+            for epoch in range(epochs):
+                for _ in range(steps_per_epoch):
+                    optimizer.step()
+                    scheduler.step()
+                    lrs.append(scheduler.get_last_lr())  # type: ignore
+                    es.append(epoch)
+            axes[b][e].plot(es, lrs, color="black", lw=0.2)
+            axes[b][e].set_ylabel("LR")
+            if (b == len(BATCH_SIZES) - 1) and (e == len(EPOCHS) - 1):
+                axes[b][e].set_xlabel("Epoch")
+            axes[b][e].set_title(f"btch={batch_size}, stepsize_up={stepsize_up}")
+    fig.suptitle(f"max_lr={max_lr}, base_lr={base_lr}, stepsize_up={stepsize_up}")
+    fig.set_size_inches(w=6 * len(EPOCHS), h=4 * len(BATCH_SIZES))
+    fig.subplots_adjust(hspace=0.4)
+    plt.show()
+
+
+def test_step_values(base_lr: float = 0.01, step_size: int = 30, gamma_sub: float = 1e-3) -> None:
+    BATCH_SIZES = [4, 8, 16, 32, 64]
+    sbn.set_style("darkgrid")
+    fig, axes = plt.subplots(ncols=len(EPOCHS), nrows=len(BATCH_SIZES))
+    for e, epochs in tqdm(enumerate(EPOCHS), total=len(EPOCHS)):
+        for b, batch_size in enumerate(BATCH_SIZES):
+            model = Sequential(PReLU())
+            optimizer = SGD(model.parameters(), lr=base_lr, weight_decay=1e-5)
+            scheduler = StepLR(optimizer, step_size=step_size, gamma=float(1.0 - gamma_sub))
+            lrs = [scheduler.get_last_lr()]  # type: ignore
+            es = [0]
+            for epoch in range(epochs):
+                optimizer.step()
+                scheduler.step()
+                lrs.append(scheduler.get_last_lr())  # type: ignore
+                es.append(epoch)
+            axes[b][e].plot(es, lrs, color="black", lw=0.2)
+            axes[b][e].set_ylabel("LR")
+            if (b == len(BATCH_SIZES) - 1) and (e == len(EPOCHS) - 1):
+                axes[b][e].set_xlabel("Epoch")
+            min_lr = np.min(lrs)
+            max_lr = np.max(lrs)
+            axes[b][e].set_title(f"batch_size={batch_size}, lr=({min_lr:0.1e},{max_lr:0.1e})")
+    fig.suptitle(f"base_lr={base_lr}")
+    fig.set_size_inches(w=6 * len(EPOCHS), h=4 * len(BATCH_SIZES))
+    fig.subplots_adjust(hspace=0.4)
+    plt.show()
+
+
+def test_exp_values(base_lr: float = 0.01, gamma_sub: float = 1e-3) -> None:
+    BATCH_SIZES = [4, 8, 16, 32, 64]
+    sbn.set_style("darkgrid")
+    fig, axes = plt.subplots(ncols=len(EPOCHS), nrows=len(BATCH_SIZES))
+    for e, epochs in tqdm(enumerate(EPOCHS), total=len(EPOCHS)):
+        for b, batch_size in enumerate(BATCH_SIZES):
+            model = Sequential(PReLU())
+            optimizer = SGD(model.parameters(), lr=base_lr, weight_decay=1e-5)
+            scheduler = ExponentialLR(optimizer, gamma=float(1.0 - gamma_sub))
+            lrs = [scheduler.get_last_lr()]  # type: ignore
+            es = [0]
+            for epoch in range(epochs):
+                optimizer.step()
+                scheduler.step()
+                lrs.append(scheduler.get_last_lr())  # type: ignore
+                es.append(epoch)
+            axes[b][e].plot(es, lrs, color="black", lw=0.2)
+            axes[b][e].set_ylabel("LR")
+            if (b == len(BATCH_SIZES) - 1) and (e == len(EPOCHS) - 1):
+                axes[b][e].set_xlabel("Epoch")
+            min_lr = np.min(lrs)
+            max_lr = np.max(lrs)
+            axes[b][e].set_title(f"batch_size={batch_size}, lr=({min_lr:0.1e},{max_lr:0.1e})")
+    fig.suptitle(f"base_lr={base_lr}")
+    fig.set_size_inches(w=6 * len(EPOCHS), h=4 * len(BATCH_SIZES))
+    fig.subplots_adjust(hspace=0.4)
+    plt.show()
+
+
+def test_small_cyclic_values(mode="triangular2") -> None:
     BATCH_SIZE = 128
     sbn.set_style("darkgrid")
     fig, axes = plt.subplots(ncols=len(EPOCHS))
@@ -202,7 +334,7 @@ def test_small_cyclic_values() -> None:
         max_lr = 0.01
         base_lr = 1e-4
         scheduler = torch.optim.lr_scheduler.CyclicLR(
-            optimizer, base_lr=base_lr, max_lr=max_lr, mode="triangular2", step_size_up=stepsize_up
+            optimizer, base_lr=base_lr, max_lr=max_lr, mode=mode, step_size_up=stepsize_up
         )
         lrs = [scheduler.get_last_lr()]  # type: ignore
         es = [0]
@@ -342,11 +474,55 @@ def test_random_values(min_lr: float = 1e-4, max_lr: float = 0.1) -> None:
     plt.show()
 
 
+def test_multiplicative(
+    base_lr: float = 0.01, max_lr: float = 1e-4, mode="triangular2", gamma_sub: float = 1e-3
+) -> None:
+    BATCH_SIZES = [4, 8, 16, 32, 64]
+    sbn.set_style("darkgrid")
+    fig, axes = plt.subplots(ncols=len(EPOCHS), nrows=len(BATCH_SIZES))
+    for e, epochs in enumerate(EPOCHS):
+        for b, batch_size in enumerate(BATCH_SIZES):
+            model = Sequential(PReLU())
+            optimizer = SGD(model.parameters(), lr=0.01, weight_decay=1e-5)
+            steps_per_epoch = trainloader_length(batch_size)
+            total_steps = e * steps_per_epoch
+            # cycle_length = epochs / (1 * steps_per_epoch)
+            # cycle_length = steps_per_epoch * 5
+            cycle_length = total_steps // 10
+            stepsize_up = cycle_length // 2
+            scheduler = CyclicLR(
+                optimizer,
+                base_lr=base_lr,
+                max_lr=max_lr,
+                mode=mode,
+                step_size_up=stepsize_up,
+                gamma=float(1.0 - gamma_sub),
+            )
+            lrs = [scheduler.get_last_lr()]  # type: ignore
+            es = [0]
+            for epoch in range(epochs):
+                for _ in range(steps_per_epoch):
+                    optimizer.step()
+                    scheduler.step()
+                    lrs.append(scheduler.get_last_lr())  # type: ignore
+                    es.append(epoch)
+            axes[b][e].plot(es, lrs, color="black")
+            axes[b][e].set_ylabel("LR")
+            axes[b][e].set_xlabel("Epoch")
+            axes[b][e].set_title(f"btch={batch_size}, stepsize_up={stepsize_up}")
+    fig.suptitle(f"max_lr={max_lr}, base_lr={base_lr}, stepsize_up={stepsize_up}")
+    fig.set_size_inches(w=6 * len(EPOCHS), h=4 * len(BATCH_SIZES))
+    plt.show()
+
+
 if __name__ == "__main__":
     # plot_decay_function(0.001)
-    # plot_multiplicative_decay_function(0.01)
+    # plot_multiplicative_decay_function(lr0=1e-3, gamma=5e-2, epochs=[30, 50, 100, 200])
 
     # test_small_cyclic_values()
     # test_gamma_cyclic_values(f=10)
     # test_triangular_cyclic_values()
-    test_random_values()
+    # test_random_values()
+    # test_cyclic_values(base_lr=2e-5, max_lr=1e-4, mode="triangular2", gamma_sub=1e-2)
+    # test_step_values(base_lr=3.8e-5, step_size=30, gamma_sub=1e-3)
+    test_exp_values(4e-5, gamma_sub=1e-2)
