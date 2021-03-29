@@ -1,23 +1,20 @@
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
-from typing import cast, no_type_check
-from typing_extensions import Literal
+import sys
+from itertools import repeat
+from typing import Any, Dict, List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pytest
 import seaborn as sbn
 from numpy import ndarray
-from pandas import DataFrame, Series
-from sklearn.cluster import KMeans
-from tqdm import tqdm
+from pandas import DataFrame
 from scipy.optimize import linear_sum_assignment
+from sklearn.cluster import KMeans
 from sklearn.metrics.cluster import contingency_matrix
+from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
 
 from error_consistency.functional import error_consistencies_numba
-
-from numba import jit, prange
 
 
 def random_gaussians(n_gaussians: int = 5, n_samples: int = 100):
@@ -116,154 +113,132 @@ def unbalanced_hungarian_remap(labels1: ndarray, labels2: ndarray) -> Tuple[ndar
     return two_to_one, one_to_two
 
 
-@jit(nopython=True, fastmath=True)
-def running_totals(cods: ndarray, n_steps: int) -> Tuple[ndarray, ndarray, ndarray]:
-    C_TOTAL = len(cods)
-    means = []
-    sds = []
-    steps = C_TOTAL // n_steps
-    done = 0
-    counted = []
-    for i in range(0, C_TOTAL, steps):
-        means.append(np.mean(cods[: i + 1]))
-        counted.append(i)
-        if i != 0:
-            sds.append(np.std(cods[: i + 1]))
-        if done % (n_steps // 20) == 0:
-            print("Percent done: ", 100 * i / C_TOTAL)
-        done += 1
-    return means, sds, counted
+def bootstrap_cod(subsample: List[ndarray]) -> DataFrame:
+    COLUMNS = ["n_clusterings", "disagree_pairs", "mean_cod", "sd_cod"]
+    disagreements = []
+    for i, clust1 in enumerate(subsample):
+        for j, clust2 in enumerate(subsample, start=i + 1):
+            c1, c2 = np.copy(clust1), np.copy(clust2)
+            c2 = hungarian_remap(c1, c2)
+            disagreements.append(c1 != c2)
+
+    cod_array = error_consistencies_numba(np.array(disagreements), empty_unions="1")
+    cods = cod_array[np.triu_indices_from(cod_array, k=1)].ravel()
+    mean, sd = np.mean(cods), np.std(cods, ddof=1)
+    return pd.DataFrame(columns=COLUMNS, data=[[i, len(cods), mean, sd]])
 
 
-def running_totals_decimated(cods: ndarray, decimation: int) -> Tuple[ndarray, ndarray, ndarray]:
-    decimated = cods[::decimation]
-    return running_totals(decimated, 1)
+def get_cluster(args: Dict) -> ndarray:
+    """kwargs should be (k: int, X: ndarray, y: ndarray)"""
+    k, X, y = args["k"], args["X"], args["y"]
+    return KMeans(k, max_iter=1).fit_predict(X, y)
 
 
-@jit(nopython=True, fastmath=True, parallel=True)
-def running_totals_parallel(cods: ndarray, starts: ndarray) -> Tuple[ndarray, ndarray, ndarray]:
-    N = len(starts)
-    means = np.zeros((N,))
-    sds = np.zeros((N - 1,))
-    for i in prange(N):
-        start = starts[i]
-        means[i] = np.mean(cods[: start + 1])
-        if i != 0:
-            sds[i] = np.std(cods[: start + 1])
-    return means, sds, starts
+def generate_clusterings(
+    n_clusterings: int, n_samples: int = 100, k: int = 2, preview: bool = False, n_workers: int = 2
+) -> List[ndarray]:
+    # generate random data to perform clustering on
+    N = np.random.randint(4, 7)
+    data = random_gaussians(n_gaussians=N, n_samples=n_samples)
+    X = data.iloc[:, :-1]
+    y = data.iloc[:, -1]
 
-@jit(nopython=True, fastmath=True, parallel=True)
-def running_totals_rand_parallel(cods: ndarray, n_samples: ndarray, size: int) -> Tuple[ndarray, ndarray, ndarray]:
-    # This doesn't work, need to sample random rows/columns to match actual convergence
-    means = np.zeros((n_samples,))
-    sds = np.zeros((n_samples,))
-    samples = np.zeros((n_samples * size))
-    for i in prange(n_samples):
-        sample = np.random.choice(cods, size)
-        start = starts[i]
-        means[i] = np.mean(cods[: start + 1])
-        if i != 0:
-            sds[i] = np.std(cods[: start + 1])
-    return means, sds, starts
+    if preview:
+        plt.scatter(X.iloc[:, 0], X.iloc[:, 1])
+        plt.ioff()
+        plt.show()
+        cont = input("Do you wish to use this data for clustering? [Y/n]\n")
+        if cont not in ["Y", "y", ""]:
+            print("Aborting.")
+            sys.exit()
+        else:
+            plt.close()
+
+    print(f"Computing for K = {k} in K-means...")
+    args = dict(k=k, X=X, y=y)
+    clusterings: List[ndarray] = process_map(
+        get_cluster,
+        repeat(args, n_clusterings),
+        chunksize=2,
+        max_workers=n_workers,
+        total=n_clusterings,
+        desc=f"{'Generating clusterings':.<30}",
+    )
+    # clusterings = []
+    # for _ in tqdm(
+    #     range(n_clusterings), total=n_clusterings, desc=f"{'Generating clusterings':.<30}"
+    # ):
+    #     clusterings.append(KMeans(k, max_iter=50).fit_predict(X, y))
+    return clusterings
+
+
+def compute_bootstrap_cods(
+    clusterings: List[ndarray], n_subsamples: int, n_workers: int = 2
+) -> DataFrame:
+    N_CLUSTERINGS = len(clusterings)
+    MIN_SIZE = np.max([3, N_CLUSTERINGS // 2])
+    dfs = []
+    subsamples = []
+    for _ in range(n_subsamples):
+        size = np.random.randint(MIN_SIZE, N_CLUSTERINGS, dtype=int)  # need three clusters min
+        idx = list(range(N_CLUSTERINGS))
+        idx_boot = np.random.choice(idx, size, replace=True)
+        subsample = np.array(clusterings)[idx_boot]
+        subsamples.append(subsample)
+    subsamples.append(clusterings)  # always ensure we measure the full set at least once
+
+    desc = f"{'Computing boot CoDs':.<30}"
+    if n_workers > 1:
+        dfs = process_map(  # parallelize bootstrapping
+            bootstrap_cod,
+            subsamples,
+            max_workers=2,  # leave some cores for consistency parallelization?
+            chunksize=20 if len(clusterings[0]) > 1000 else None,
+            total=n_subsamples,
+            desc=f"{'Computing boot CoDs':.<30}",
+            leave=True,
+        )
+        return pd.concat(dfs)
+    dfs = []
+    for subsample in tqdm(subsamples, total=n_subsamples, desc=desc):
+        dfs.append(bootstrap_cod(subsample))
+    return pd.concat(dfs)
+
+
+def plot_bootstrap_results(df: DataFrame) -> None:
+    sbn.set_style("darkgrid")
+    fig, axes = plt.subplots(ncols=2)
+    axes[0].scatter(df["disagree_pairs"], df["mean_cod"], label="mean", color="black", s=2.0)
+    axes[0].scatter(df["disagree_pairs"], df["sd_cod"], label="sd", color="red", s=2.0)
+    axes[0].legend().set_visible(True)
+    axes[0].set_xlabel("Number of Disagreement-Pairings Included")
+
+    axes[1].scatter(df["n_clusterings"], df["mean_cod"], label="mean", color="black", s=2.0)
+    axes[1].scatter(df["n_clusterings"], df["sd_cod"], label="sd", color="red", s=2.0)
+    axes[1].legend().set_visible(True)
+    axes[1].set_xlabel("Number of Clusterings")
+
+    final_mean = np.round(np.mean(df["mean_cod"]), 2)
+    final_sd = np.round(np.mean(df["sd_cod"]), 3)
+    fig.suptitle(
+        f"Estimated Convergence Rate of Consistency of Disagreement\nFinal: mean={final_mean}, sd={final_sd}"
+    )
+    fig.set_size_inches(w=8, h=5)
+    plt.show()
 
 
 if __name__ == "__main__":
-    N_CLUSTERINGS = 200
-    if N_CLUSTERINGS == 100:
-        np.random.seed(6)
-    elif N_CLUSTERINGS == 200:
-        np.random.seed(3)
+    # fmt: off
+    N_SAMPLES = 10000      # number of datapoints to cluster
+    N_CLUSTERINGS = 100  # number of times to repeatedly cluster the datapoints
+    N_SUBSAMPLES = 50   # bootstrap resampling clusterings to estimate convergence
+    # fmt: on
+    # if N_CLUSTERINGS == 100:
+    #     np.random.seed(6)
+    # elif N_CLUSTERINGS == 200:
+    #     np.random.seed(3)
+    K = 2  # number of K-Means clusters
 
-    N = np.random.randint(4, 7)
-    data = random_gaussians(n_gaussians=N)
-    X = data.iloc[:, :-1]
-    y = data.iloc[:, -1]
-    plt.scatter(X.iloc[:, 0], X.iloc[:, 1])
-    plt.show()
-    for k in range(2, 7):  # choice of `k` for KMeans
-        print(f"Computing for K = {k} in K-means...")
-        clusterings = []
-        for _ in tqdm(range(N_CLUSTERINGS), total=N_CLUSTERINGS, desc="Clusterings"):
-            clusterings.append(KMeans(k, max_iter=5).fit_predict(X, y))
-
-        disagreements = []
-        for i, clust1 in tqdm(enumerate(clusterings), total=N_CLUSTERINGS, desc="Disagreements"):
-            for j, clust2 in enumerate(clusterings, start=i + 1):
-                c1, c2 = np.copy(clust1), np.copy(clust2)
-                c2 = hungarian_remap(c1, c2)
-                disagreements.append(c1 != c2)
-
-        # Below takes 13 minutes just for 100 clusterings, so is no good.
-        """
-        cods, means, sds = [], [], []
-        for i, d1 in tqdm(enumerate(disagreements), total=len(disagreements), desc="Consistency"):
-            for j, d2 in enumerate(disagreements, start=i + 1):
-                union = np.sum(d1 | d2)
-                if union <= 1.0:
-                    cods.append(1.0)
-                    continue
-                denom = np.sum(d1 & d2)
-                cods.append(union / denom)
-                means.append(np.mean(cods))
-                if len(cods) > 1:
-                    sds.append(np.std(cods, ddof=1))
-        """
-        # Using my fast implementation instead this is still under a minute for 200 clusterings
-        print("Computing fast consistencies...", end="", flush=True)
-        cods_all = error_consistencies_numba(np.array(disagreements), empty_unions="1")
-        print("done.")
-        cods = cods_all[np.triu_indices_from(cods_all, k=1)].ravel()
-        print(
-            f"Mean C of Disagreement (sd): {np.mean(cods):0.3f} ({np.std(cods, ddof=1):0.3f})",
-            flush=True,
-        )
-        C_TOTAL = len(cods)
-
-        # again, below is way too slow
-        """
-        means, sds = [], []
-        for i in tqdm(range(C_TOTAL), total=C_TOTAL, desc="Running totals"):
-            means.append(cods[: i + 1])
-            if i != 0:
-                sds.append(cods[: i + 1])
-        """
-
-        # this is also way too slow:
-        """
-        print("Computing fast running totals...", end="", flush=True)
-        means, sds = running_totals(cods, steps=1)
-        print("done.")
-        """
-
-        # We instead approximate by only taking the mean every D steps
-        # Even still this is extremely slow for just 200 clusterings
-        # And results in strange shapes
-        print("Computing fast running totals...\n")
-        # means, sds, counted = running_totals(cods, n_steps=1000)
-        C_TOTAL, n_steps = len(cods), 1000
-        steps = C_TOTAL // n_steps
-        starts = np.array(list(range(0, C_TOTAL, steps)), dtype=int)
-        means, sds, counted = running_totals_parallel(cods, starts)
-
-        # x = list(range(C_TOTAL))
-        sbn.set_style("darkgrid")
-        fig, axes = plt.subplots(ncols=2)
-        # ax.plot(x, consistencies, label="consistency", color="black")
-        axes[0].plot(counted[1:], means[1:], label="mean", color="black")
-        axes[0].plot(counted[2:], sds[1:], label="sd")
-        axes[0].legend().set_visible(True)
-        axes[0].set_xlabel("Number of Disagreement-Pairings Included")
-
-        required_k = (np.array(counted) * 8) ** 0.25
-        axes[1].plot(required_k[1:], means[1:], label="mean", color="black")
-        axes[1].plot(required_k[2:], sds[1:], label="sd")
-        axes[1].legend().set_visible(True)
-        axes[1].set_xlabel("Approximate Number of Clusterings Needed")
-
-        final_mean = np.round(np.mean(means[-C_TOTAL // 10 :]), 2)
-        final_sd = np.round(np.mean(sds[-C_TOTAL // 10 :]), 3)
-        fig.suptitle(
-            f"Estimated Convergence Rate of Consistency of Disagreement\nFinal: mean={final_mean}, sd={final_sd}"
-        )
-        fig.set_size_inches(w=8, h=5)
-        plt.show()
+    clusterings = generate_clusterings(N_CLUSTERINGS, N_SAMPLES, k=K, preview=True)
+    df = compute_bootstrap_cods(clusterings, N_SUBSAMPLES, n_workers=1)
+    plot_bootstrap_results(df)
