@@ -25,9 +25,9 @@ from analysis.covid.arguments import EfficientNetArgs
 from analysis.covid.datamodule import CovidCTDataModule
 from analysis.covid.lr_scheduling import (
     cosine_scheduling,
-    cyclic_scheduling,
+    cyclic_scheduling, exponential_scheduling,
     linear_test_scheduling,
-    onecycle_scheduling,
+    onecycle_scheduling, step_scheduling,
 )
 from analysis.covid.transforms import RESIZE
 
@@ -144,10 +144,14 @@ class CovidLightningEfficientNet(LightningModule):
             return self.cosine_scheduling()
         elif self.lr_schedule == "cyclic":
             return self.cyclic_scheduling()
-        elif self.lr_schedule == "one-cycle":
-            return self.onecycle_scheduling()
+        elif self.lr_schedule == "exp":
+            return self.exponential_scheduling()
         elif self.lr_schedule == "linear-test":
             return self.linear_test_scheduling()
+        elif self.lr_schedule == "one-cycle":
+            return self.onecycle_scheduling()
+        elif self.lr_schedule == "step":
+            return self.step_scheduling()
         else:
             return Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
@@ -155,6 +159,8 @@ class CovidLightningEfficientNet(LightningModule):
     cosine_scheduling = cosine_scheduling
     linear_test_scheduling = linear_test_scheduling
     onecycle_scheduling = onecycle_scheduling
+    step_scheduling = step_scheduling
+    exponential_scheduling = exponential_scheduling
 
 
 def callbacks(hparams: Namespace) -> List[Callback]:

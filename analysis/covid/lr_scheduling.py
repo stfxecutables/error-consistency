@@ -129,8 +129,19 @@ def cyclic_scheduling(self: Any) -> Tuple[List[Optimizer], List[Dict[str, Union[
 
 def step_scheduling(self: Any) -> Tuple[List[Optimizer], List[Dict[str, Union[StepLR, str]]]]:
     optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-    sched = StepLR(optimizer=optimizer, step_size=75, gamma=0.5)
+    sched = StepLR(
+        optimizer=optimizer, step_size=self.params["step_size"], gamma=self.params["gamma"]
+    )
     scheduler: Dict[str, Union[StepLR, str]] = {"scheduler": sched, "interval": "epoch"}
+    return [optimizer], [scheduler]
+
+
+def exponential_scheduling(
+    self: Any
+) -> Tuple[List[Optimizer], List[Dict[str, Union[ExponentialLR, str]]]]:
+    optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+    sched = ExponentialLR(optimizer=optimizer, gamma=1.0 - self.params["gamma_sub"])
+    scheduler: Dict[str, Union[ExponentialLR, str]] = {"scheduler": sched, "interval": "epoch"}
     return [optimizer], [scheduler]
 
 
@@ -292,15 +303,18 @@ def test_step_values(base_lr: float = 0.01, step_size: int = 30, gamma_sub: floa
     plt.show()
 
 
-def test_exp_values(base_lr: float = 0.01, gamma_sub: float = 1e-3) -> None:
-    BATCH_SIZES = [4, 8, 16, 32, 64]
+def test_exp_values(
+    base_lr: float = 0.01, gamma_sub_min: float = 1e-3, gamma_sub_max: float = 1e-2
+) -> None:
+    EPOCHS = [10, 30, 50, 100, 200, 300]
+    gammas = [1.0 - g for g in np.linspace(gamma_sub_min, gamma_sub_max, 8)]
     sbn.set_style("darkgrid")
-    fig, axes = plt.subplots(ncols=len(EPOCHS), nrows=len(BATCH_SIZES))
+    fig, axes = plt.subplots(ncols=len(EPOCHS), nrows=len(gammas), sharey=True)
     for e, epochs in tqdm(enumerate(EPOCHS), total=len(EPOCHS)):
-        for b, batch_size in enumerate(BATCH_SIZES):
+        for g, gamma in enumerate(gammas):
             model = Sequential(PReLU())
             optimizer = SGD(model.parameters(), lr=base_lr, weight_decay=1e-5)
-            scheduler = ExponentialLR(optimizer, gamma=float(1.0 - gamma_sub))
+            scheduler = ExponentialLR(optimizer, gamma=gamma)
             lrs = [scheduler.get_last_lr()]  # type: ignore
             es = [0]
             for epoch in range(epochs):
@@ -308,16 +322,16 @@ def test_exp_values(base_lr: float = 0.01, gamma_sub: float = 1e-3) -> None:
                 scheduler.step()
                 lrs.append(scheduler.get_last_lr())  # type: ignore
                 es.append(epoch)
-            axes[b][e].plot(es, lrs, color="black", lw=0.2)
-            axes[b][e].set_ylabel("LR")
-            if (b == len(BATCH_SIZES) - 1) and (e == len(EPOCHS) - 1):
-                axes[b][e].set_xlabel("Epoch")
+            axes[g][e].plot(es, lrs, color="black", lw=0.2)
+            # axes[g][e].set_ylabel("LR")
+            # axes[g][e].set_xlabel("Epoch")
             min_lr = np.min(lrs)
-            max_lr = np.max(lrs)
-            axes[b][e].set_title(f"batch_size={batch_size}, lr=({min_lr:0.1e},{max_lr:0.1e})")
+            axes[g][e].set_title(f"min_lr=({min_lr:0.1e})")
     fig.suptitle(f"base_lr={base_lr}")
-    fig.set_size_inches(w=6 * len(EPOCHS), h=4 * len(BATCH_SIZES))
-    fig.subplots_adjust(hspace=0.4)
+    fig.text(x=0.5, y=0.05, s="Epochs", ha="center")  # X axis label
+    fig.text(x=0.05, y=0.5, s="LR", va="center", rotation="vertical")  # y axis label
+    fig.set_size_inches(w=6 * len(EPOCHS), h=4 * len(gammas) + 1)
+    fig.subplots_adjust(top=0.9, bottom=0.11, left=0.11, right=0.9, hspace=0.7, wspace=0.2)
     plt.show()
 
 
@@ -524,5 +538,8 @@ if __name__ == "__main__":
     # test_triangular_cyclic_values()
     # test_random_values()
     # test_cyclic_values(base_lr=2e-5, max_lr=1e-4, mode="triangular2", gamma_sub=1e-2)
-    # test_step_values(base_lr=3.8e-5, step_size=30, gamma_sub=1e-3)
-    test_exp_values(4e-5, gamma_sub=1e-2)
+    # test_step_values(base_lr=3.8e-5, step_size=75, gamma_sub=0.5)
+    # test_exp_values(1e-5, gamma_sub_min=5e-3, gamma_sub_max=1e-2)  # pretty reasonable
+    test_exp_values(1e-5, gamma_sub_min=1e-3, gamma_sub_max=1e-2)  # maybe more reasonable
+    # test_exp_values(1e-5, gamma_sub_min=8e-3, gamma_sub_max=2e-2)  # I like this one.
+

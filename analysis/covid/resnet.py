@@ -30,9 +30,11 @@ from analysis.covid.datamodule import CovidCTDataModule, get_transform, CovidDat
 from analysis.covid.lr_scheduling import (
     cosine_scheduling,
     cyclic_scheduling,
+    exponential_scheduling,
     linear_test_scheduling,
     onecycle_scheduling,
-    random_scheduling, step_scheduling,
+    random_scheduling,
+    step_scheduling,
 )
 from analysis.covid.custom_layers import GlobalAveragePooling
 from analysis.covid.arguments import to_namespace
@@ -109,9 +111,9 @@ class CovidLightningResNet(LightningModule):
         self.weight_decay = config["weight_decay"]
         self.lr_schedule = config["lr_schedule"]
         self.ray = use_ray
-        self.train_data: TensorDataset = self._get_dataset("train")
-        self.val_data: TensorDataset = self._get_dataset("val")
-        self.test_data: TensorDataset = self._get_dataset("test")
+        # self.train_data: TensorDataset = self._get_dataset("train")
+        # self.val_data: TensorDataset = self._get_dataset("val")
+        # self.test_data: TensorDataset = self._get_dataset("test")
 
     @no_type_check
     def forward(self, x: Tensor) -> Tensor:
@@ -175,31 +177,32 @@ class CovidLightningResNet(LightningModule):
             return self.cosine_scheduling()
         elif self.lr_schedule == "cyclic":
             return self.cyclic_scheduling()
-        elif self.lr_schedule == "one-cycle":
-            return self.onecycle_scheduling()
+        elif self.lr_schedule == "exp":
+            return self.exponential_scheduling()
         elif self.lr_schedule == "linear-test":
             return self.linear_test_scheduling()
-        elif self.lr_schedule == "step":
-            return self.step_scheduling()
+        elif self.lr_schedule == "one-cycle":
+            return self.onecycle_scheduling()
         elif self.lr_schedule == "random":
             raise NotImplementedError()
             return self.random_scheduling()
+        elif self.lr_schedule == "step":
+            return self.step_scheduling()
         else:
             return Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
     @no_type_check
     def prepare_data(self, *args, **kwargs):
-        return
-        self.train: TensorDataset = self._get_dataset("train")
-        self.val: TensorDataset = self._get_dataset("val")
-        self.test: TensorDataset = self._get_dataset("test")
+        self.train_data: TensorDataset = self._get_dataset("train")
+        self.val_data: TensorDataset = self._get_dataset("val")
+        self.test_data: TensorDataset = self._get_dataset("test")
 
     @no_type_check
     def setup(self, stage: str) -> None:
         # see
-        self.train_data: TensorDataset = self._get_dataset("train")
-        self.val_data: TensorDataset = self._get_dataset("val")
-        self.test_data: TensorDataset = self._get_dataset("test")
+        self.train_data = self._get_dataset("train")
+        self.val_data = self._get_dataset("val")
+        self.test_data = self._get_dataset("test")
 
     @no_type_check
     def train_dataloader(self, *args: Any, **kwargs: Any) -> DataLoader:
@@ -252,6 +255,7 @@ class CovidLightningResNet(LightningModule):
     onecycle_scheduling = onecycle_scheduling
     random_scheduling = random_scheduling
     step_scheduling = step_scheduling
+    exponential_scheduling = exponential_scheduling
 
 
 def callbacks(config: Dict[str, Any]) -> List[Callback]:

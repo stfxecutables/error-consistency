@@ -9,7 +9,17 @@ from typing_extensions import Literal
 IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
 ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 # https://pytorch.org/hub/pytorch_vision_resnet/ default=18,
-LR_CHOICES = ["random", "cosine", "cyclic", "linear-test", "one-cycle", "step", "none", "None"]
+LR_CHOICES = [
+    "random",
+    "cosine",
+    "cyclic",
+    "linear-test",
+    "one-cycle",
+    "step",
+    "exp",
+    "none",
+    "None",
+]
 CYCLIC_CHOICES = ["tr", "triangular", "triangular2", "tr2", "gamma", "exp_range"]
 EFFNET_CHOICES = [f"b{i}" for i in range(8)]
 RESNET_CHOICES = [18, 34, 50, 101, 152]
@@ -41,6 +51,9 @@ LR_ARGS: Dict[str, Dict] = {
     "--lrtest-epochs-to-max": dict(type=float, default=1500),
     "--cyclic-mode": dict(choices=CYCLIC_CHOICES, default="gamma"),
     "--cyclic-f": dict(type=int, default=60),
+    "--step-size": dict(type=int, default=75),
+    "--gamma": dict(type=float, default=0.5),  # for "step" LR
+    "--gamma-sub": dict(type=float, default=1e-2),  # for gamma = 1 - gamma_sub in exp LR
 }
 
 AUG_ARGS: Dict[str, Dict] = {
@@ -150,6 +163,10 @@ class EfficientNetArgs:
                 lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e},f={f})"
             else:
                 lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e})"
+        elif sched == "step":
+            sched = f"x{hp.gamma:0.1f}@{hp.step_size}steps"
+        elif sched == "exp":
+            sched = f"exp{hp.gamma_sub:0.1e}"
         wd = f"L2={hp.weight_decay:1.2e}"
         b = hp.batch_size
         e = hp.max_epochs
@@ -249,6 +266,10 @@ class ResNetArgs:
                 lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e},f={f})"
             else:
                 lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e})"
+        elif sched == "step":
+            sched = f"x{hp.gamma:0.1f}@{hp.step_size}steps"
+        elif sched == "exp":
+            sched = f"exp{hp.gamma_sub:0.1e}"
         wd = f"L2={hp.weight_decay:1.2e}"
         b = hp.batch_size
         e = hp.max_epochs

@@ -6,7 +6,7 @@ import sys
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from time import strftime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, no_type_check
 from pandas import DataFrame
 
 import ray
@@ -42,7 +42,7 @@ GPU = 1 / 8 if ON_COMPUTE_CANADA else 1 / 3
 NUM_SAMPLES = 32 if ON_COMPUTE_CANADA else 6
 
 BASE_BATCHES = [4, 8, 16, 32, 64] if ON_COMPUTE_CANADA else [4, 8, 16, 32]
-BASE_LR_MIN, BASE_LR_MAX = 1e-6, 1e-4
+BASE_LR_MIN, BASE_LR_MAX = 1e-6, 1e-2
 BASE_LR_BOUNDARY = tune.loguniform(BASE_LR_MIN, BASE_LR_MAX).sample()
 BASE_CONFIG = dict(
     # basic / model
@@ -53,9 +53,12 @@ BASE_CONFIG = dict(
     initial_lr=tune.loguniform(BASE_LR_MIN, BASE_LR_MAX),
     lr_min=tune.loguniform(BASE_LR_MIN, BASE_LR_BOUNDARY),
     lr_max=tune.loguniform(BASE_LR_BOUNDARY + BASE_LR_MIN, BASE_LR_MAX),
-    lr_schedule=tune.choice(["cyclic", "step", "None"]),  # None is Adam
+    lr_schedule=tune.choice(["cyclic", "step", "exp", "None"]),  # None is Adam
     cyclic_mode=tune.choice(CYCLIC_CHOICES),
     cyclic_f=tune.qrandint(10, 100, 10),
+    step_size=tune.qrandint(20, 100, 5),
+    gamma=tune.quniform(0.1, 0.9, 0.1),
+    gamma_sub=tune.uniform(1e-3, 1e-2),
     # regularization
     weight_decay=tune.loguniform(1e-6, 1.0),
     dropout=tune.quniform(0.05, 0.95, 0.05),
@@ -74,7 +77,7 @@ BASE_CONFIG = dict(
 TWEAK_BATCHES = [4, 8, 16, 32, 64]
 TWEAK_LR_MIN, TWEAK_LR_MAX = 1e-6, 1e-2
 TWEAK_LR_BOUNDARY = tune.loguniform(TWEAK_LR_MIN, TWEAK_LR_MAX).sample()
-TWEAK_SCHEDULES = ["None"]
+TWEAK_SCHEDULES = [None]
 TWEAK_CONFIG = dict(
     # basic / model
     pretrain=tune.choice([True, False]),
@@ -87,6 +90,9 @@ TWEAK_CONFIG = dict(
     lr_schedule=tune.choice(TWEAK_SCHEDULES),
     cyclic_mode=tune.choice(CYCLIC_CHOICES),
     cyclic_f=tune.qrandint(10, 100, 10),
+    step_size=tune.qrandint(20, 100, 5),
+    gamma=tune.quniform(0.1, 0.9, 0.1),
+    gamma_sub=tune.uniform(1e-3, 1e-2),
     # regularization
     weight_decay=tune.loguniform(1e-6, 1),
     dropout=tune.quniform(0.65, 0.95, 0.05),
@@ -102,18 +108,25 @@ TWEAK_CONFIG = dict(
     noise_sd=tune.uniform(1e-3, 1.0),
 )
 
+# Short names solely for CLI Reporter readability
 PARAMS_DICT = dict(
+    # model
     version="v",
     batch_size="btch",
     pretrain="pre",
     output="out",
-    initial_lr="lr",
     weight_decay="L2",
+    # learning rates
+    initial_lr="lr",
     lr_schedule="sched",
     lr_min="lr-min",
     lr_max="lr-max",
     cyclic_mode="cyc-mode",
     cyclic_f="cyc-f",
+    step_size="lr-step",
+    gamma="step-g",
+    gamma_sub="g-sub",
+    # augmentation / regularization
     dropout="drop",
     elastic_scale="e-scale",
     elastic_trans="e-transl",
@@ -153,11 +166,9 @@ def callbacks(config: Dict[str, Any]) -> List[Callback]:
             mode="max",
             save_weights_only=False,
         ),
-        # TuneReportCallback({"loss": "pts/val_loss", "acc": "ptl/val_acc"}, on="validation_end"),
-        # TuneReportCallback({"loss": "val_loss", "acc": "val_acc"}, on="validation_end"),
         TuneReportCallback(["val_acc", "val_loss", "val_epoch"], on="validation_end"),
     ]
-    return list(filter(lambda c: c is not None, cbs))
+    return list(filter(lambda c: c is not None, cbs))  # type: ignore
 
 
 # def train_resnet(config: Dict[str, Any], num_workers=1, num_epochs=2):
@@ -186,6 +197,7 @@ def tune_resnet(config: Dict[str, Any]) -> None:
 
 # @ray.remote(num_gpus=GPU, max_calls=1)
 # NOTE: maybe can use this later to get test results in parallel
+@no_type_check
 @ray.remote(max_calls=1)
 def test_acc(config: Namespace) -> Dict:
     dm = CovidCTDataModule(hparams=config)
@@ -221,27 +233,32 @@ def predownload() -> None:
 
 
 # Rapidly hits 80% test acc in like 20 epochs
-# python analysis/covid/resnet.py --batch-size=32 --version=18 --lr-schedule=None --initial-lr=1.4e-4 --lr-max=0.1 --lr-min=1e-5  --max-epochs=50 --weight-decay=0.006 --noise --noise-sd=0.5 --output=gap --dropout=0.8 --pretrain
+# python analysis/covid/resnet.py --batch-size=32 --version=18\
+#       --lr-schedule=None --initial-lr=1.4e-4 --lr-max=0.1 --lr-min=1e-5\
+#       --max-epochs=50 --weight-decay=0.006 --noise --noise-sd=0.5\
+#       --output=gap --dropout=0.8 --pretrain
 if __name__ == "__main__":
-    # ray.init(num_cpus=6, num_gpus=1)
-    # see https://stackoverflow.com/questions/54338013/parallel-import-a-python-file-from-sibling-folder
-    # parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ###########################################################################
+    # START RESOLVING ANNOYING COMPUTE CANADA ISSUES:
     predownload()
+    # sys.path modifications happen only in main thread, need to manually ensure
+    # children also inherit / get this. See link below for details.
+    # https://stackoverflow.com/questions/54338013/parallel-import-a-python-file-from-sibling-folder
     parent_dir = str(Path(__file__).resolve().parent.parent.parent)
     os.environ["PYTHONPATH"] = f"{parent_dir}:{os.environ.get('PYTHONPATH', '')}"
 
     # another hack, see https://github.com/ray-project/ray/issues/10995#issuecomment-698177711
     os.environ["SLURM_JOB_NAME"] = "bash"
+    # END RESOLVING ANNOYING COMPUTE CANADA ISSUES.
+    ###########################################################################
 
     config = get_config()
     ray.init()
     # fmt: off
-    batches = [4, 8, 16, 32, 64] if ON_COMPUTE_CANADA else [4, 8, 16, 32]
-    lr_boundary = tune.loguniform(5e-6, 1e-1).sample()
     config = {
         **config,
         **BASE_CONFIG,
-        **TWEAK_CONFIG,
+        # **TWEAK_CONFIG,
     }
     # fmt: on
     scheduler = AsyncHyperBandScheduler(
