@@ -42,8 +42,9 @@ GPU = 1 / 8 if ON_COMPUTE_CANADA else 1 / 3
 NUM_SAMPLES = 32 if ON_COMPUTE_CANADA else 6
 
 BASE_BATCHES = [4, 8, 16, 32, 64] if ON_COMPUTE_CANADA else [4, 8, 16, 32]
-BASE_LR_MIN, BASE_LR_MAX = 1e-6, 1e-2
+BASE_LR_MIN, BASE_LR_MAX = 1e-8, 1e-4
 BASE_LR_BOUNDARY = tune.loguniform(BASE_LR_MIN, BASE_LR_MAX).sample()
+BASE_CYCLIC_CHOICES = filter(lambda s: s in ["gamma", "exp_range"], CYCLIC_CHOICES)
 BASE_CONFIG = dict(
     # basic / model
     pretrain=tune.choice([True, False]),
@@ -54,7 +55,7 @@ BASE_CONFIG = dict(
     lr_min=tune.loguniform(BASE_LR_MIN, BASE_LR_BOUNDARY),
     lr_max=tune.loguniform(BASE_LR_BOUNDARY + BASE_LR_MIN, BASE_LR_MAX),
     lr_schedule=tune.choice(["cyclic", "step", "exp", "None"]),  # None is Adam
-    cyclic_mode=tune.choice(CYCLIC_CHOICES),
+    cyclic_mode=tune.choice(BASE_CYCLIC_CHOICES),
     cyclic_f=tune.qrandint(10, 100, 10),
     step_size=tune.qrandint(20, 100, 5),
     gamma=tune.quniform(0.1, 0.9, 0.1),
@@ -77,6 +78,7 @@ BASE_CONFIG = dict(
 TWEAK_BATCHES = [4, 8, 16, 32, 64]
 TWEAK_LR_MIN, TWEAK_LR_MAX = 1e-6, 1e-2
 TWEAK_LR_BOUNDARY = tune.loguniform(TWEAK_LR_MIN, TWEAK_LR_MAX).sample()
+TWEAK_CYCLIC_CHOICES = BASE_CYCLIC_CHOICES
 TWEAK_SCHEDULES = [None]
 TWEAK_CONFIG = dict(
     # basic / model
@@ -88,7 +90,7 @@ TWEAK_CONFIG = dict(
     lr_min=tune.loguniform(TWEAK_LR_MIN, TWEAK_LR_BOUNDARY),
     lr_max=tune.loguniform(TWEAK_LR_BOUNDARY + TWEAK_LR_MIN * 5, TWEAK_LR_MAX),
     lr_schedule=tune.choice(TWEAK_SCHEDULES),
-    cyclic_mode=tune.choice(CYCLIC_CHOICES),
+    cyclic_mode=tune.choice(TWEAK_CYCLIC_CHOICES),
     cyclic_f=tune.qrandint(10, 100, 10),
     step_size=tune.qrandint(20, 100, 5),
     gamma=tune.quniform(0.1, 0.9, 0.1),
@@ -136,6 +138,36 @@ PARAMS_DICT = dict(
     noise_sd="noise-sd",
 )
 METRICS_DICT = dict(val_loss="loss", val_acc="acc", val_epoch="epoch", training_iteration="step")
+
+COLUMNS_FMT = dict(
+    val_acc="0.3f",
+    val_loss="1.5f",
+    steps="",
+    batch="",
+    pre="",
+    output="",
+    lr0="1.2e",
+    L2="1.2e",
+    lr_sched="",
+    lr_min="1.2e",
+    lr_max="1.2e",
+    cyc_mode="",
+    cyc_f="",
+    step_size="",
+    gamma="0.1f",
+    gamma_sub="1.2e",
+    dropout="0.2f",
+    el_scale="0.3f",
+    el_trans="0.3f",
+    el_shear="0.3f",
+    el_degree="",
+    no_el="",
+    no_rand_crop="",
+    no_flip="",
+    noise="",
+    noise_sd="0.2f",
+    time_total_s="0.0f",
+)
 
 
 def trainer_defaults(config: Dict[str, Any]) -> Dict:
@@ -311,6 +343,8 @@ if __name__ == "__main__":
     )
     ray.shutdown()
 
+    pd.set_option("display.width", 999)
+    pd.set_option("display.max_columns", 999)
     print(results)
     results.sort_values(by="val_acc", ascending=False, inplace=True)
     results.to_json(RAY_RESULTS_CURRENT)
@@ -325,4 +359,11 @@ if __name__ == "__main__":
         print("No previous Ray results found. Saving current results...")
     results.to_json(RAY_RESULTS_ALL)
     print(f"Saved all results to {RAY_RESULTS_ALL}")
+
+    printable = results.drop(columns=["onecycle_pct", "date"])
+    table = printable.to_markdown(
+        tablefmt="plain", index=True, floatfmt=[""] + list(COLUMNS_FMT.values())
+    )
+    print("Summary of all results so far:")
+    print(table)
 

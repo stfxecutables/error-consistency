@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from typing import cast, no_type_check
 from typing_extensions import Literal
+from time import strftime
 
 IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
 ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
@@ -75,6 +76,12 @@ TUNABLE_PARAMS = (
 TUNABLE_PARAMS = list(map(lambda s: s.replace("--", "").replace("-", "_"), TUNABLE_PARAMS))
 
 
+class DictToNamespaceLike:
+    def __init__(self, args: Dict[str, Any]) -> None:
+        for key, val in args.items():
+            setattr(self, key, val)
+
+
 def get_log_params() -> List[str]:
     tunable = ["--version", "--batch-size"]
     tunable.extend(list(RESNET_MODEL_ARGS.keys()))
@@ -103,6 +110,63 @@ def to_namespace(config: Dict[str, Any]) -> Namespace:
     for key, val in config.items():
         setattr(ns, key, val)
     return ns
+
+
+def cyclic_lr_string(hparams: Namespace) -> str:
+    mode = hparams.cyclic_mode
+    if mode in ["tr", "triangular"]:
+        m = "tr"
+    elif mode in ["tr2", "triangular2"]:
+        m = "tr2"
+    else:
+        m = "exp"
+    lr_max = hparams.lr_max
+    lr_base = hparams.lr_min
+    f = hparams.cyclic_f
+    if mode in ["gamma", "exp_range"]:
+        lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e},f={f})"
+    else:
+        lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e})"
+    return lr
+
+
+def lr_scheduling_strings(hparams: Namespace) -> Tuple[str, str]:
+    sched = hparams.lr_schedule
+    lr = f"lr0={hparams.initial_lr:1.2e}"
+    is_range_test = sched == "linear-test"
+    if sched == "one-cycle":
+        sched = f"{sched}{hparams.onecycle_pct:1.2f}"
+    elif is_range_test:
+        sched = str(sched).upper()
+        lr = f"lr-max={hparams.lrtest_max}@{hparams.lrtest_epochs_to_max}"
+    elif sched == "cyclic":
+        lr = cyclic_lr_string(hparams)
+    elif sched == "step":
+        sched = f"x{hparams.gamma:0.1f}@{hparams.step_size}steps"
+    elif sched == "exp":
+        sched = f"exp{hparams.gamma_sub:0.1e}"
+    return sched, lr
+
+
+def augments_string(hparams: Namespace) -> str:
+    crop = "crop" if not hparams.no_rand_crop else ""
+    flip = "rflip" if not hparams.no_flip else ""
+    elas = "elst" if not hparams.no_elastic else ""
+    scale = float(np.round(hparams.elastic_scale, 3))
+    trans = float(np.round(hparams.elastic_trans, 3))
+    shear = float(np.round(hparams.elastic_shear, 3))
+    degree = int(np.round(hparams.elastic_degree, 0))
+    if elas != "":
+        elas = f"{elas}(sc={scale:0.3f}_tr={trans:0.3f}" f"_sh={shear:0.3f}_deg={degree})"
+    noise = f"noise{hparams.noise_sd:1.2f}" if hparams.noise else ""
+
+    drop = f"drp{hparams.dropout:0.2f}"
+    augs = f"{crop}+{flip}+{elas}+{noise}+{drop}".replace("++", "+")
+    if augs[-1] == "+":
+        augs = augs[:-1]
+    if augs[0] == "+":
+        augs = augs[1:]
+    return augs
 
 
 class EfficientNetArgs:
@@ -137,56 +201,12 @@ class EfficientNetArgs:
     def info_from_args(args: Namespace, info: str) -> str:
         hp = args
         ver = hp.version
-        pre = "-pretrained" if hp.pretrain else ""
-
-        # learning rate-related
-        sched = hp.lr_schedule
-        lr = f"lr0={hp.initial_lr:1.2e}"
-        is_range_test = sched == "linear-test"
-        if sched == "one-cycle":
-            sched = f"{sched}{hp.onecycle_pct:1.2f}"
-        elif is_range_test:
-            sched = str(sched).upper()
-            lr = f"lr-max={hp.lrtest_max}@{hp.lrtest_epochs_to_max}"
-        elif sched == "cyclic":
-            mode = hp.cyclic_mode
-            if mode in ["tr", "triangular"]:
-                m = "tr"
-            elif mode in ["tr2", "triangular2"]:
-                m = "tr2"
-            else:
-                m = "exp"
-            lr_max = hp.lr_max
-            lr_base = hp.lr_min
-            f = hp.cyclic_f
-            if mode in ["gamma", "exp_range"]:
-                lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e},f={f})"
-            else:
-                lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e})"
-        elif sched == "step":
-            sched = f"x{hp.gamma:0.1f}@{hp.step_size}steps"
-        elif sched == "exp":
-            sched = f"exp{hp.gamma_sub:0.1e}"
+        pre = "-pre" if hp.pretrain else ""
+        sched, lr = lr_scheduling_strings(hp)
         wd = f"L2={hp.weight_decay:1.2e}"
         b = hp.batch_size
         e = hp.max_epochs
-
-        # augments
-        crop = "crop" if not hp.no_rand_crop else ""
-        flip = "rflip" if not hp.no_flip else ""
-        elas = "elst" if not hp.no_elastic else ""
-        if elas != "":
-            elas = (
-                f"{elas}(sc={hp.elastic_scale}_tr={hp.elastic_trans}"
-                f"_sh={hp.elastic_shear}_deg={hp.elastic_degree})"
-            )
-        noise = "noise" if hp.noise else ""
-        drop = f"drp{hp.dropout:0.1f}"
-        augs = f"{crop}+{flip}+{elas}+{noise}+{drop}".replace("++", "+")
-        if augs[-1] == "+":
-            augs = augs[:-1]
-        if augs[0] == "+":
-            augs = augs[1:]
+        augs = augments_string(hp)
 
         if info == "scriptname":
             return f"submit__eff-net-{ver}{pre}_{sched}_{lr}_{wd}_{b}batch_{e}ep_{augs}.sh"
@@ -227,76 +247,22 @@ class ResNetArgs:
 
     @staticmethod
     def info_from_args(args: Union[Namespace, Dict[str, Any]], info: str) -> str:
-        if isinstance(args, dict):
-
-            class Dummy:
-                def __init__(self, args: Dict[str, Any]) -> None:
-                    for key, val in args.items():
-                        setattr(self, key, val)
-
-            hp: Any = Dummy(args)
-        else:
-            hp = args
+        timestamp = strftime("%b%d")
+        hp: Any = DictToNamespaceLike(args) if isinstance(args, dict) else args
         ver = hp.version
         pre = "-pre" if hp.pretrain else ""
         out = "-lin" if hp.output == "linear" else "-GAP"
         mdl = f"ResNet{ver}{out}{pre}"
-
-        # learning rate-related
-        sched = hp.lr_schedule
-        lr = f"lr0={hp.initial_lr:1.2e}"
-        is_range_test = sched == "linear-test"
-        if sched == "one-cycle":
-            sched = f"{sched}{hp.onecycle_pct:1.2f}"
-        elif is_range_test:
-            sched = str(sched).upper()
-            lr = f"lr-max={hp.lr_max}@{hp.lrtest_epochs_to_max}"
-        elif sched == "cyclic":
-            mode = hp.cyclic_mode
-            if mode in ["tr", "triangular"]:
-                m = "tr"
-            elif mode in ["tr2", "triangular2"]:
-                m = "tr2"
-            else:
-                m = "exp"
-            lr_max = hp.lr_max
-            lr_base = hp.lr_min
-            f = hp.cyclic_f
-            if mode in ["gamma", "exp_range"]:
-                lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e},f={f})"
-            else:
-                lr = f"cyc-{m}=({lr_base:1.1e},{lr_max:1.1e})"
-        elif sched == "step":
-            sched = f"x{hp.gamma:0.1f}@{hp.step_size}steps"
-        elif sched == "exp":
-            sched = f"exp{hp.gamma_sub:0.1e}"
+        sched, lr = lr_scheduling_strings(hp)
         wd = f"L2={hp.weight_decay:1.2e}"
         b = hp.batch_size
         e = hp.max_epochs
-
-        # augments
-        crop = "crop" if not hp.no_rand_crop else ""
-        flip = "rflip" if not hp.no_flip else ""
-        elas = "elst" if not hp.no_elastic else ""
-        scale = float(np.round(hp.elastic_scale, 3))
-        trans = float(np.round(hp.elastic_trans, 3))
-        shear = float(np.round(hp.elastic_shear, 3))
-        degree = int(np.round(hp.elastic_degree, 0))
-        if elas != "":
-            elas = f"{elas}(sc={scale:0.3f}_tr={trans:0.3f}" f"_sh={shear:0.3f}_deg={degree:0.3f})"
-        noise = f"noise{hp.noise_sd:1.2f}" if hp.noise else ""
-
-        drop = f"drp{hp.dropout:0.2f}"
-        augs = f"{crop}+{flip}+{elas}+{noise}+{drop}".replace("++", "+")
-        if augs[-1] == "+":
-            augs = augs[:-1]
-        if augs[0] == "+":
-            augs = augs[1:]
+        augs = augments_string(hp)
 
         if info == "scriptname":
             return f"submit__{mdl}_{sched}_{lr}_{wd}_{b}batch_{e}ep_{augs}.sh"
         elif info == "logpath":
-            version_dir = Path(__file__).resolve().parent / f"logs/{mdl}/{sched}"
+            version_dir = Path(__file__).resolve().parent / f"logs/{mdl}/{sched}/{timestamp}"
             dirname = f"{lr}_{wd}_{b}batch_{e}ep_{augs}"
             return str(version_dir / dirname)
         else:
