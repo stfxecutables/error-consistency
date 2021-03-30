@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from tqdm import tqdm
 import json
 import os
 import sys
@@ -277,9 +279,7 @@ class CovidLightningResNet(LightningModule):
     @classmethod
     def from_lightning_logs(
         cls, log_dir: Path = None, version: int = 18, num: int = 1
-    ) -> Tuple[CovidLightningResNet, Dict[str, Any]]:
-        from pprint import pprint
-
+    ) -> Tuple[List[CovidLightningResNet], List[Dict[str, Any]]]:
         def acc(path: Path) -> float:
             fname = path.name
             accuracy = float(re.match(r".*val_acc=(.*?)_", fname).group(1))
@@ -300,15 +300,24 @@ class CovidLightningResNet(LightningModule):
             filter(lambda p: "last" not in p.name, log_dir.rglob(rglob)), key=acc, reverse=True
         )
         best = ckpts[:num]
-        hparams = list(map(lambda p: list(p.parent.rglob("hparams.yaml"))[0], best))
-        # hp = load_hparams_from_yaml(str(hparams[0]))
-        # config = hp["config"]
-        ckpt_data = torch.load(ckpts[0])
-        config = ckpt_data[cls.CHECKPOINT_HYPER_PARAMS_KEY]
-        if "ray" in config:  # for some reason this messes things up
-            del config["ray"]
-        mdl = cls._load_model_state(ckpt_data, use_ray=False)
-        return mdl, config["config"]
+        ckpt_data = [torch.load(ckpt) for ckpt in best]
+        configs = [ckpt_dict[cls.CHECKPOINT_HYPER_PARAMS_KEY] for ckpt_dict in ckpt_data]
+        for config in configs:
+            if "ray" in config:  # for some reason this messes things up
+                del config["ray"]
+        mdls = []
+        cfgs = []
+        for ckpt, config in tqdm(
+            zip(ckpt_data, configs), total=len(configs), desc="Loading models"
+        ):
+            try:
+                mdls.append(cls._load_model_state(ckpt, use_ray=False))
+                cfgs.append(config["config"])
+            except (TypeError, KeyError):
+                pass
+        # mdls = [cls._load_model_state(ckpt, use_ray=False) for ckpt in ckpt_data]
+        # cfgs = [config["config"] for config in configs]  # parent key
+        return mdls, cfgs
 
     cyclic_scheduling = cyclic_scheduling
     cosine_scheduling = cosine_scheduling
