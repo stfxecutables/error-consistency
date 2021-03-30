@@ -40,6 +40,9 @@ IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
 ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 GPU = 1 / 8 if ON_COMPUTE_CANADA else 1 / 3
 NUM_SAMPLES = 32 if ON_COMPUTE_CANADA else 6
+GRACE_PERIOD = 25
+MAX_T = 151
+
 
 BASE_BATCHES = [4, 8, 16, 32, 64] if ON_COMPUTE_CANADA else [4, 8, 16, 32]
 BASE_LR_MIN, BASE_LR_MAX = 1e-8, 1e-4
@@ -194,7 +197,7 @@ def callbacks(config: Dict[str, Any]) -> List[Callback]:
             filename="{epoch}-{step}_{val_acc:.2f}_{train_acc:0.3f}",
             monitor="val_acc",
             save_last=True,
-            save_top_k=1,
+            save_top_k=3,
             mode="max",
             save_weights_only=False,
         ),
@@ -253,15 +256,21 @@ def get_config() -> Dict:
     return hparams.__dict__  # type: ignore
 
 
-def predownload() -> None:
+def process_cmdline_options() -> None:
+    global MAX_T
+    global GRACE_PERIOD
     parser = ArgumentParser()
     parser.add_argument("--download", action="store_true")
+    parser.add_argument("--fast-dev-run", action="store_true")
     args = parser.parse_args()
-    if args.download:
+    if args.download:  # pre-download models for Compute Canada
         for model in [resnet18, resnet34, resnet50, resnet101, resnet152]:
             _ = model(pretrained=True)
             _ = model(pretrained=False)
         sys.exit()
+    if args.fast_dev_run:  # gotta go fast
+        GRACE_PERIOD = 5
+        MAX_T = 10
 
 
 # Rapidly hits 80% test acc in like 20 epochs
@@ -272,7 +281,7 @@ def predownload() -> None:
 if __name__ == "__main__":
     ###########################################################################
     # START RESOLVING ANNOYING COMPUTE CANADA ISSUES:
-    predownload()
+    process_cmdline_options()
     # sys.path modifications happen only in main thread, need to manually ensure
     # children also inherit / get this. See link below for details.
     # https://stackoverflow.com/questions/54338013/parallel-import-a-python-file-from-sibling-folder
@@ -294,7 +303,9 @@ if __name__ == "__main__":
     }
     # fmt: on
     scheduler = AsyncHyperBandScheduler(
-        time_attr="val_epoch", grace_period=25, max_t=151  # defined in `validation_step`
+        time_attr="val_epoch",  # defined in `validation_step`
+        grace_period=GRACE_PERIOD,
+        max_t=MAX_T,
     )
 
     reporter = CLIReporter(
@@ -345,6 +356,7 @@ if __name__ == "__main__":
 
     pd.set_option("display.width", 999)
     pd.set_option("display.max_columns", 999)
+    pd.set_option("display.max_rows", 999)
     print(results)
     results.sort_values(by="val_acc", ascending=False, inplace=True)
     results.to_json(RAY_RESULTS_CURRENT)

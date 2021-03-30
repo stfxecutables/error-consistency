@@ -1,9 +1,13 @@
+from __future__ import annotations
+import json
 import os
 import sys
 import numpy as np
+import re
 from argparse import Namespace
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, no_type_check
+from warnings import warn
 from ray.tune import report
 
 import torch
@@ -18,11 +22,13 @@ from pytorch_lightning.callbacks import (
     ModelCheckpoint,
 )
 from pytorch_lightning.metrics.functional import accuracy
+from pytorch_lightning.core.saving import load_hparams_from_yaml
 from torch import Tensor
 from torch.nn import BCEWithLogitsLoss as Loss
 from torch.nn import Module
 from torch.optim import Adam
 from torch.optim.optimizer import Optimizer
+
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from analysis.covid.arguments import ResNetArgs
@@ -249,6 +255,61 @@ class CovidLightningResNet(LightningModule):
             print("Training number of samples:", len(x))
         return CovidDataset(x, y, transform)
 
+    @staticmethod
+    def from_ray_id(ray_dir: Path, trial_id: str) -> CovidLightningResNet:
+        runs = sorted(ray_dir.rglob(f"*{trial_id}*"))
+        if len(runs) > 1:
+            raise RuntimeError("Too many matching runs.")
+        elif len(runs) < 1:
+            raise RuntimeError("No matching runs.")
+        else:
+            print(f"Found run at: {runs[0]}")
+        run_dir = runs[0]
+        jsonfile = run_dir / "params.json"
+        config: Dict[str, Any]
+        with open(jsonfile, "r") as file:
+            config = json.load(file)
+        defaults = trainer_defaults(config)
+        dm = CovidCTDataModule(config)
+        model = CovidLightningResNet(config, use_ray=False)
+        trainer = Trainer.from_argparse_args(to_namespace(config), **defaults)
+
+    @classmethod
+    def from_lightning_logs(
+        cls, log_dir: Path = None, version: int = 18, num: int = 1
+    ) -> Tuple[CovidLightningResNet, Dict[str, Any]]:
+        from pprint import pprint
+
+        def acc(path: Path) -> float:
+            fname = path.name
+            accuracy = float(re.match(r".*val_acc=(.*?)_", fname).group(1))
+            step = int(re.match(r".*step=(.*?)_", fname).group(1))
+            epoch = int(re.match(r"epoch=(.*?)-", fname).group(1))
+            if epoch < 20:
+                return 0
+            if step < 200:
+                return 0
+            if accuracy > 0.99:
+                return 0.0
+            return accuracy
+
+        if log_dir is None:
+            log_dir = Path(__file__).resolve().parent / "logs"
+        rglob = f"ResNet{version}*/**/*.ckpt"
+        ckpts = sorted(
+            filter(lambda p: "last" not in p.name, log_dir.rglob(rglob)), key=acc, reverse=True
+        )
+        best = ckpts[:num]
+        hparams = list(map(lambda p: list(p.parent.rglob("hparams.yaml"))[0], best))
+        # hp = load_hparams_from_yaml(str(hparams[0]))
+        # config = hp["config"]
+        ckpt_data = torch.load(ckpts[0])
+        config = ckpt_data[cls.CHECKPOINT_HYPER_PARAMS_KEY]
+        if "ray" in config:  # for some reason this messes things up
+            del config["ray"]
+        mdl = cls._load_model_state(ckpt_data, use_ray=False)
+        return mdl, config["config"]
+
     cyclic_scheduling = cyclic_scheduling
     cosine_scheduling = cosine_scheduling
     linear_test_scheduling = linear_test_scheduling
@@ -268,7 +329,7 @@ def callbacks(config: Dict[str, Any]) -> List[Callback]:
             filename="{epoch}-{step}_{val_acc:.2f}_{train_acc:0.3f}",
             monitor="val_acc",
             save_last=True,
-            save_top_k=1,
+            save_top_k=3,
             mode="max",
             save_weights_only=False,
         ),
