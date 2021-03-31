@@ -36,9 +36,11 @@ RAY_RESULTS_CURRENT = RAY_RESULTS / f"results_{TIMESTAMP}.json"
 if not RAY_RESULTS.exists():
     os.makedirs(RAY_RESULTS, exist_ok=True)
 
+RESNET_VERSION = 34
 IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
 ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
-GPU = 1 / 8 if ON_COMPUTE_CANADA else 1 / 3
+GPU_CCANADA = 1 / 8 if RESNET_VERSION == 18 else 1 / 6
+GPU = GPU_CCANADA if ON_COMPUTE_CANADA else 1 / 3
 NUM_SAMPLES = 128 if ON_COMPUTE_CANADA else 6
 GRACE_PERIOD = 25
 MAX_T = 151
@@ -51,6 +53,7 @@ BASE_CYCLIC_CHOICES = filter(lambda s: s in ["gamma", "exp_range"], CYCLIC_CHOIC
 BASE_CONFIG = dict(
     # basic / model
     # pretrain=tune.choice([True, False]),
+    version=RESNET_VERSION,
     pretrain=tune.choice([True]),
     batch_size=tune.choice(BASE_BATCHES),
     output=tune.choice(["gap", "linear"]),
