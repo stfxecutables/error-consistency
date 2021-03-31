@@ -40,7 +40,7 @@ if __name__ == "__main__":
     df = pd.concat(dfs, ignore_index=True)
     df.sort_values(by="acc", ascending=False, inplace=True)
     print(df)
-    timestamp = strftime("%b%d-%H:M")
+    timestamp = strftime("%b%d-%H:%M")
     outdir = Path(__file__).resolve().parent / "ray_results"
     outfile = outdir / f"test_results_{timestamp}.json"
     df.to_json(outfile)
