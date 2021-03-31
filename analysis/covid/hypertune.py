@@ -50,21 +50,22 @@ BASE_LR_BOUNDARY = tune.loguniform(BASE_LR_MIN, BASE_LR_MAX).sample()
 BASE_CYCLIC_CHOICES = filter(lambda s: s in ["gamma", "exp_range"], CYCLIC_CHOICES)
 BASE_CONFIG = dict(
     # basic / model
-    pretrain=tune.choice([True, False]),
+    # pretrain=tune.choice([True, False]),
+    pretrain=tune.choice([True]),
     batch_size=tune.choice(BASE_BATCHES),
     output=tune.choice(["gap", "linear"]),
     # learning rates
     initial_lr=tune.loguniform(BASE_LR_MIN, BASE_LR_MAX),
     lr_min=tune.loguniform(BASE_LR_MIN, BASE_LR_BOUNDARY),
     lr_max=tune.loguniform(BASE_LR_BOUNDARY + BASE_LR_MIN, BASE_LR_MAX),
-    lr_schedule=tune.choice(["cyclic", "step", "exp", "None"]),  # None is Adam
+    lr_schedule=tune.choice(["step", "exp", "None"]),  # None is Adam
     cyclic_mode=tune.choice(BASE_CYCLIC_CHOICES),
     cyclic_f=tune.qrandint(10, 100, 10),
     step_size=tune.qrandint(20, 100, 5),
     gamma=tune.quniform(0.1, 0.9, 0.1),
     gamma_sub=tune.uniform(1e-3, 1e-2),
     # regularization
-    weight_decay=tune.loguniform(1e-6, 1.0),
+    weight_decay=tune.loguniform(1e-9, 1.0),
     dropout=tune.quniform(0.05, 0.95, 0.05),
     # augments
     no_rand_crop=False,
