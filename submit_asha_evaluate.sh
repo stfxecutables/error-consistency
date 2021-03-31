@@ -10,7 +10,9 @@
 #SBATCH --gres=gpu:v100:1
 #SBATCH --partition=all_gpus
 #SBATCH --mail-user=dberger@stfx.ca
+#SBATCH --mail-type=BEGIN
 #SBATCH --mail-type=FAIL
+#SBATCH --mail-type=END
 
 PROJECT=$HOME/projects/def-jlevman/dberger/error-consistency
 LOGS=$PROJECT/analysis/covid/logs
