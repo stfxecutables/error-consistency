@@ -8,7 +8,7 @@ import numpy as np
 import re
 from argparse import Namespace
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, no_type_check
+from typing import Any, Dict, Generator, List, Tuple, no_type_check
 from warnings import warn
 from ray.tune import report
 
@@ -201,6 +201,7 @@ class CovidLightningResNet(LightningModule):
 
     @no_type_check
     def prepare_data(self, *args, **kwargs):
+        return
         self.train_data: TensorDataset = self._get_dataset("train")
         self.val_data: TensorDataset = self._get_dataset("val")
         self.test_data: TensorDataset = self._get_dataset("test")
@@ -253,8 +254,8 @@ class CovidLightningResNet(LightningModule):
         transform = get_transform(self.config, subset)
         x = torch.from_numpy(np.load(DATA / f"x_{subset}.npy")).unsqueeze(1)
         y = torch.from_numpy(np.load(DATA / f"y_{subset}.npy")).unsqueeze(1).float()
-        if subset == "train":
-            print("Training number of samples:", len(x))
+        # if subset == "train":
+        #     print("Training number of samples:", len(x))
         return CovidDataset(x, y, transform)
 
     @staticmethod
@@ -279,7 +280,7 @@ class CovidLightningResNet(LightningModule):
     @classmethod
     def from_lightning_logs(
         cls, log_dir: Path = None, version: int = 18, num: int = 1
-    ) -> Tuple[List[CovidLightningResNet], List[Dict[str, Any]]]:
+    ) -> Generator[Tuple[List[CovidLightningResNet], List[Dict[str, Any]]], None, None]:
         def acc(path: Path) -> float:
             fname = path.name
             accuracy = float(re.match(r".*val_acc=(.*?)_", fname).group(1))
@@ -295,7 +296,10 @@ class CovidLightningResNet(LightningModule):
 
         if log_dir is None:
             log_dir = Path(__file__).resolve().parent / "logs"
-        rglob = f"ResNet{version}*/**/*.ckpt"
+            rglob = f"ResNet{version}*/**/*.ckpt"
+        else:
+            rglob = f"*.ckpt"
+
         ckpts = sorted(
             filter(lambda p: "last" not in p.name, log_dir.rglob(rglob)), key=acc, reverse=True
         )
@@ -307,17 +311,17 @@ class CovidLightningResNet(LightningModule):
                 del config["ray"]
         mdls = []
         cfgs = []
-        for ckpt, config in tqdm(
-            zip(ckpt_data, configs), total=len(configs), desc="Loading models"
-        ):
+        for ckpt, config in zip(ckpt_data, configs):
             try:
-                mdls.append(cls._load_model_state(ckpt, use_ray=False))
-                cfgs.append(config["config"])
+                mdl = cls._load_model_state(ckpt, use_ray=False)
+                cfg = config["config"]
+                yield mdl, cfg
+                # mdls.append(mdl)
+                # cfgs.append(cfg)
             except (TypeError, KeyError):
                 pass
         # mdls = [cls._load_model_state(ckpt, use_ray=False) for ckpt in ckpt_data]
         # cfgs = [config["config"] for config in configs]  # parent key
-        return mdls, cfgs
 
     cyclic_scheduling = cyclic_scheduling
     cosine_scheduling = cosine_scheduling

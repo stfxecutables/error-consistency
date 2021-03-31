@@ -14,7 +14,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from analysis.covid.transforms import get_transform
 
 DATA = Path(__file__).resolve().parent.parent.parent / "tests/datasets/covid-ct"
-
+N_TRAIN = 425
 
 class CovidDataset(Dataset):
     def __init__(self, x: Tensor, y: Tensor, transform: Optional[Callable]) -> None:
