@@ -38,6 +38,7 @@ EFFNET_MODEL_ARGS: Dict[str, Dict] = {
 }
 
 RESNET_MODEL_ARGS: Dict[str, Dict] = {
+    "--version": dict(type=int, choices=RESNET_CHOICES, default=18),
     "--pretrain": dict(action="store_true"),  # i.e. do pre-train if flag
     "--output": dict(choices=["gap", "linear"], default="gap"),
     "--initial-lr": dict(type=float, default=0.001),
@@ -83,7 +84,7 @@ class DictToNamespaceLike:
 
 
 def get_log_params() -> List[str]:
-    tunable = ["--version", "--batch-size"]
+    tunable = ["--batch-size"]
     tunable.extend(list(RESNET_MODEL_ARGS.keys()))
     tunable.extend(list(LR_ARGS.keys()))
     tunable.extend(list(AUG_ARGS.keys()))
@@ -222,7 +223,6 @@ class ResNetArgs:
     @staticmethod
     def program_level_parser() -> ArgumentParser:
         parser = ArgumentParser()
-        parser.add_argument("--version", type=int, choices=RESNET_CHOICES, default=18)
         parser.add_argument("--resnet", type=bool, default=True)
         for argname, kwargs in PROG_ARGS.items():
             parser.add_argument(argname, **kwargs)

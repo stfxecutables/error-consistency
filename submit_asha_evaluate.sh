@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --account=def-jlevman
-#SBATCH --time=0-01:00:00  # [dd]-[hh]:[mm]:[ss]
+#SBATCH --time=0-00:20:00  # [dd]-[hh]:[mm]:[ss]
 #SBATCH --signal=INT@300
 #SBATCH --job-name=asha_test
 #SBATCH --output=asha_resnet_%j.out
