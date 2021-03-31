@@ -39,7 +39,7 @@ if not RAY_RESULTS.exists():
 IN_COMPUTE_CANADA_JOB = os.environ.get("SLURM_TMPDIR") is not None
 ON_COMPUTE_CANADA = os.environ.get("CC_CLUSTER") is not None
 GPU = 1 / 8 if ON_COMPUTE_CANADA else 1 / 3
-NUM_SAMPLES = 32 if ON_COMPUTE_CANADA else 6
+NUM_SAMPLES = 128 if ON_COMPUTE_CANADA else 6
 GRACE_PERIOD = 25
 MAX_T = 151
 
