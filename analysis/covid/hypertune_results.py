@@ -23,7 +23,11 @@ if __name__ == "__main__":
             dm = CovidCTDataModule(config)
             defaults = trainer_defaults(config)
             trainer = Trainer.from_argparse_args(to_namespace(config), **defaults)
-            acc = trainer.test(model, datamodule=dm, verbose=False)[0]["test_acc"]
+            test_acc = trainer.test(model, datamodule=dm, verbose=False)[0]["test_acc"]
+            dm.setup(stage="fit")
+            val_acc = trainer.test(model, test_dataloaders=dm.val_dataloader(), verbose=False)[0][
+                "test_acc"
+            ]
             tunables = {}
             for param in TUNABLE_PARAMS:
                 if param in config:
@@ -31,14 +35,15 @@ if __name__ == "__main__":
             df = pd.DataFrame(tunables, index=[0]).rename(columns=PARAMS_DICT)
             df.drop(columns="lrtest_epochs_to_max", inplace=True)
             cols = df.columns
-            df["acc"] = np.round(acc, 3)
-            df = df.loc[:, ["acc", *cols]]  # sort so "acc" column first
+            df["test_acc"] = np.round(test_acc, 3)
+            df["val_acc"] = np.round(val_acc, 3)
+            df = df.loc[:, ["test_acc", "val_acc", *cols]]  # sort so "acc" column first
             dfs.append(df)
         except Exception as e:
             print(e)
 
     df = pd.concat(dfs, ignore_index=True)
-    df.sort_values(by="acc", ascending=False, inplace=True)
+    df.sort_values(by="test_acc", ascending=False, inplace=True)
     print(df)
     timestamp = strftime("%b%d-%H:%M")
     outdir = Path(__file__).resolve().parent / "ray_results"
