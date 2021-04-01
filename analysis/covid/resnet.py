@@ -304,24 +304,18 @@ class CovidLightningResNet(LightningModule):
             filter(lambda p: "last" not in p.name, log_dir.rglob(rglob)), key=acc, reverse=True
         )
         best = ckpts[:num]
-        ckpt_data = [torch.load(ckpt) for ckpt in best]
-        configs = [ckpt_dict[cls.CHECKPOINT_HYPER_PARAMS_KEY] for ckpt_dict in ckpt_data]
-        for config in configs:
+        # we need to do this as an iterator or will run out of GPU memory
+        for ckpt_path in best:
+            ckpt = torch.load(ckpt_path)
+            config = ckpt[cls.CHECKPOINT_HYPER_PARAMS_KEY]
             if "ray" in config:  # for some reason this messes things up
                 del config["ray"]
-        mdls = []
-        cfgs = []
-        for ckpt, config in zip(ckpt_data, configs):
             try:
                 mdl = cls._load_model_state(ckpt, use_ray=False)
                 cfg = config["config"]
                 yield mdl, cfg
-                # mdls.append(mdl)
-                # cfgs.append(cfg)
             except (TypeError, KeyError):
                 pass
-        # mdls = [cls._load_model_state(ckpt, use_ray=False) for ckpt in ckpt_data]
-        # cfgs = [config["config"] for config in configs]  # parent key
 
     cyclic_scheduling = cyclic_scheduling
     cosine_scheduling = cosine_scheduling
