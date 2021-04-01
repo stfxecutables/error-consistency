@@ -1,6 +1,8 @@
+import gc
 import pandas as pd
 import sys
 import numpy as np
+import torch
 
 from pathlib import Path
 from time import strftime
@@ -41,6 +43,8 @@ if __name__ == "__main__":
             dfs.append(df)
         except Exception as e:
             print(e)
+        torch.cuda.empty_cache()
+        gc.collect()
 
     df = pd.concat(dfs, ignore_index=True)
     df.sort_values(by="test_acc", ascending=False, inplace=True)

@@ -3,7 +3,7 @@
 #SBATCH --time=0-01:00:00  # [dd]-[hh]:[mm]:[ss]
 #SBATCH --signal=INT@300
 #SBATCH --job-name=asha_test
-#SBATCH --output=asha_resnet_%j.out
+#SBATCH --output=htune_evaluate_%j.out
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=12G
