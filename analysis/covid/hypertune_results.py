@@ -18,7 +18,7 @@ RAY_DIR = Path.home() / "ray_results"
 if __name__ == "__main__":
     # CovidLightningResNet.from_ray_id(ray_dir=RAY_DIR, trial_id="4fc8c_00000")
     dfs = []
-    for model, config in CovidLightningResNet.from_lightning_logs(num=100):
+    for model, config in CovidLightningResNet.from_lightning_logs(num=200):
         try:
             dm = CovidCTDataModule(config)
             defaults = trainer_defaults(config)
