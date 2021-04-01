@@ -1,4 +1,5 @@
 from __future__ import annotations
+from analysis.covid.hypertune import RESNET_VERSION
 
 from tqdm import tqdm
 import json
@@ -279,7 +280,7 @@ class CovidLightningResNet(LightningModule):
 
     @classmethod
     def from_lightning_logs(
-        cls, log_dir: Path = None, version: int = 18, num: int = 1
+        cls, log_dir: Path = None, num: int = 1
     ) -> Generator[Tuple[List[CovidLightningResNet], List[Dict[str, Any]]], None, None]:
         def acc(path: Path) -> float:
             fname = path.name
@@ -296,9 +297,9 @@ class CovidLightningResNet(LightningModule):
 
         if log_dir is None:
             log_dir = Path(__file__).resolve().parent / "logs"
-            rglob = f"ResNet{version}*/**/*.ckpt"
+            rglob = "ResNet*/**/*.ckpt"
         else:
-            rglob = f"*.ckpt"
+            rglob = "*.ckpt"
 
         ckpts = sorted(
             filter(lambda p: "last" not in p.name, log_dir.rglob(rglob)), key=acc, reverse=True
