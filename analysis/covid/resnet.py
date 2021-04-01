@@ -1,5 +1,4 @@
 from __future__ import annotations
-from analysis.covid.hypertune import RESNET_VERSION
 
 from tqdm import tqdm
 import json
