@@ -1,24 +1,39 @@
-from pandas import DataFrame
 import os
-from pathlib import Path
-import numpy as np
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
-from typing import cast, no_type_check
-from typing_extensions import Literal
+from enum import Enum
 from itertools import repeat
-from tests.loading import load_diabetes, load_park, load_SPECT, load_trans
-from sklearn.neighbors import KNeighborsClassifier as KNN
-from sklearn.svm import SVC
-from sklearn.linear_model import LogisticRegression as LR
-from sklearn.ensemble import RandomForestClassifier as RF
+from pathlib import Path
+from typing import Dict, Tuple, Type, Union
+
+import numpy as np
+from pandas import DataFrame
 from sklearn.ensemble import AdaBoostClassifier as AdaBoost
+from sklearn.ensemble import RandomForestClassifier as RF
+from sklearn.linear_model import LogisticRegression as LR
+from sklearn.neighbors import KNeighborsClassifier as KNN
 from sklearn.neural_network import MLPClassifier
+from sklearn.svm import SVC
 
-OUTDIR = Path(__file__).resolve().parent / "results"
-PLOT_OUTDIR = OUTDIR / "plots"
-RESULTS_DIR = Path(__file__).resolve().parent / "results/dfs"
+from tests.loading import load_diabetes, load_park, load_SPECT, load_trans
 
-for dir in [OUTDIR, PLOT_OUTDIR, RESULTS_DIR]:
+
+DOWNSAMPLE_OUTDIR = Path(__file__).resolve().parent / "results/downsample"
+FEATURE_SELECTION_OUTDIR = Path(__file__).resolve().parent / "results/feature_selection"
+
+DOWNSAMPLE_PLOT_OUTDIR = DOWNSAMPLE_OUTDIR / "plots"
+DOWNSAMPLE_RESULTS_DIR = Path(__file__).resolve().parent / "results/dfs"
+FEATURE_PLOT_OUTDIR = FEATURE_SELECTION_OUTDIR / "plots"
+FEATURE_RESULTS_DIR = Path(__file__).resolve().parent / "results/dfs"
+
+DIRS = [
+    DOWNSAMPLE_OUTDIR,
+    FEATURE_SELECTION_OUTDIR,
+    DOWNSAMPLE_PLOT_OUTDIR,
+    DOWNSAMPLE_RESULTS_DIR,
+    FEATURE_PLOT_OUTDIR,
+    FEATURE_RESULTS_DIR,
+]
+
+for dir in DIRS:
     if not dir.exists():
         os.makedirs(dir, exist_ok=True)
 
@@ -95,3 +110,11 @@ DATA: Dict[str, Tuple[DataFrame, DataFrame]] = {
     "Transfusion": load_trans(),
     "SPECT": load_SPECT(),
 }
+
+# Would prefer Literal, but clusters often don't have newer Python versions...
+class Analysis(Enum):
+    feature = "feature"
+    downsample = "downsample"
+
+
+AnalysisType = Union[Analysis, str]

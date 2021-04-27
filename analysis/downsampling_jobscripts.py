@@ -5,7 +5,7 @@ from typing import List, Tuple
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from analysis.constants import KFOLD_REPS, N_PERCENTS, RESULTS_DIR
+from analysis.constants import KFOLD_REPS, N_PERCENTS, DOWNSAMPLE_RESULTS_DIR
 
 CLASSIFIER_CHOICES = ["knn1", "knn3", "knn5", "knn10", "lr", "svm", "rf", "ada", "mlp"]
 DATASET_CHOICES = ["diabetes", "park", "trans", "spect"]
@@ -19,7 +19,7 @@ def generate_script(
     mlp_time: str = "4-00:00:00",
     job_name: str = "downsampling",
     mlp_job_name: str = "downsampling_mlp",
-    results_dir: Path = RESULTS_DIR,
+    results_dir: Path = DOWNSAMPLE_RESULTS_DIR,
     kfold_reps: int = KFOLD_REPS,
     n_percents: int = N_PERCENTS,
     cpus: int = 8,

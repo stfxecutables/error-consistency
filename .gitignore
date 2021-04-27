@@ -4,6 +4,8 @@
 analysis/covid/logs
 analysis/covid/job_scripts/submit__eff*.sh
 analysis/covid/ray
+analysis/results/**/*.png
+analysis/results/**/*.pdf
 analysis/job_scripts/submit__eff*.sh
 tests/datasets/covid-ct
 
