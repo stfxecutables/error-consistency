@@ -2,44 +2,19 @@ import os
 import sys
 from pathlib import Path
 from tqdm import tqdm
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
-from typing import cast, no_type_check
-from typing_extensions import Literal
-from itertools import repeat
+from typing import Dict, Tuple, Type, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import seaborn as sbn
-from argparse import ArgumentParser, Namespace
+from argparse import Namespace
 from numpy import ndarray
 from pandas import DataFrame, Series
-from enum import Enum
-from sklearn.neighbors import KNeighborsClassifier as KNN
-from sklearn.svm import SVC
-from sklearn.linear_model import LogisticRegression as LR
-from sklearn.ensemble import RandomForestClassifier as RF
-from sklearn.ensemble import AdaBoostClassifier as AdaBoost
-from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from warnings import filterwarnings
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from analysis.constants import (
-    PERCENT_MAX,
-    PERCENT_MIN,
-    DOWNSAMPLE_PLOT_OUTDIR,
-    DOWNSAMPLE_RESULTS_DIR,
-    N_ROWS,
-    REPS_PER_PERCENT,
-    KFOLD_REPS,
-    PERCENTS,
-    COLS,
-    CLASSIFIERS,
-    DATA,
-)
+from analysis.constants import CLASSIFIERS, DATA
 from analysis.downsampling_setup import argparse_setup, classifier_from_args, dataset_from_args
 from error_consistency.consistency import (
     ErrorConsistencyKFoldHoldout,
@@ -204,9 +179,8 @@ def select_features(X: ndarray, percent: float) -> Tuple[ndarray, ndarray]:
         raise ValueError("`percent` must be a float in [0, 1].")
     n_features = X.shape[1]
     n_select = np.ceil(percent * n_features).astype(int).item()
-    idx = np.random.choice(np.arange(n_features, dtype=int), n_select)
+    idx = np.random.choice(np.arange(n_features, dtype=int), n_select, replace=False).ravel()
     return np.copy(X[:, idx]), idx
-
 
 
 def get_percent_acc_consistency(
@@ -226,9 +200,10 @@ def get_percent_acc_consistency(
     percent: float
         Between 0 and 100
     """
+    X = np.asmatrix(np.copy(X))
     X_select, idx = select_features(X, percent / 100)
     if X_test is not None:
-        X_test = np.copy(X_test[:, idx])
+        X_test = np.copy(np.asmatrix(X_test[:, idx]))
     if X_select.shape[1] < 1:
         raise RuntimeError("Failed to select features.")
 
@@ -311,7 +286,7 @@ def holdout_downsampling(args: Namespace) -> None:
         row += 1
         pbar_percent.update()
     pbar_percent.close()
-    print("row:", row)
+    print("rows:", row)
     assert row == n_rows
     df = DataFrame(
         data=data, columns=["Percent", "Accuracy", "Consistency"], index=range(n_rows), dtype=float
@@ -319,17 +294,25 @@ def holdout_downsampling(args: Namespace) -> None:
     print(df)
     classifier = classifier.replace(" ", "_")
     val = "holdout" if args.validation == "external" else "internal"
-    outfile = outdir / f"{dataset}_{classifier}__k-fold-{val}.json"
+    outfile = outdir / f"{dataset}_{classifier}__k-fold-{val}_feat.json"
     df.to_json(outfile)
 
+
 if __name__ == "__main__":
-    parser = argparse_setup()
-    # args = parser.parse_args()
-    args = parser.parse_args(
-        "--classifier lr --dataset diabetes --kfold-reps 10 --n-percents 50 --results-dir analysis/results/testresults --pbar --cpus 8 --validation internal".split(
-            " "
-        )
+    cmd_args = (
+        "--classifier lr "
+        "--dataset diabetes "
+        "--kfold-reps 5 "
+        "--n-percents 20 "
+        "--percent-min 20 "
+        "--results-dir analysis/results/testresults "
+        "--pbar "
+        "--cpus 4 "
+        "--validation internal"
     )
+    parser = argparse_setup("feature")
+    # args = parser.parse_args()
+    args = parser.parse_args(cmd_args.split(" "))
     filterwarnings("ignore", message="Got `batch_size`", category=UserWarning)
     filterwarnings("ignore", message="Stochastic Optimizer")
     filterwarnings("ignore", message="Liblinear failed to converge")

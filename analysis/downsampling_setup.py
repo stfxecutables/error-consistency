@@ -17,7 +17,6 @@ from analysis.constants import (
     PERCENT_MIN,
     DOWNSAMPLE_PLOT_OUTDIR,
     DOWNSAMPLE_RESULTS_DIR,
-    _AnalysisType,
 )
 
 CLASSIFIER_CHOICES = ["knn1", "knn3", "knn5", "knn10", "lr", "svm", "rf", "ada", "mlp"]
@@ -25,7 +24,7 @@ DATASET_CHOICES = ["diabetes", "park", "trans", "spect"]
 SCRIPT_OUTDIR = Path(__file__).resolve().parent.parent
 
 
-def argparse_setup(analysis: AnalysisType = "analysis") -> ArgumentParser:
+def argparse_setup(analysis: AnalysisType = "downsample") -> ArgumentParser:
     analyse = Analysis(analysis)
     parser = ArgumentParser(description="Plot effect of downsampling on error consistency.")
     parser.add_argument(
