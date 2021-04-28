@@ -10,7 +10,6 @@ from itertools import repeat
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pytest
 import seaborn as sbn
 from argparse import ArgumentParser, Namespace
 from numpy import ndarray
@@ -76,7 +75,7 @@ def overall_cohen_d(X: DataFrame, y: FlatArray, statistic: str = "mean") -> floa
     is invalid (e.g. each feature has its own unit of measure, and allowing "-1 f1" to cancel out `1
     f2" for units "f1" and "f2" is invalid.
     """
-    data = X.to_numpy()
+    data = np.asmatrix(np.copy(X))
     x1, x2 = data[y == 0], data[y == 1]
     n1, n2 = len(x1) - 1, len(x2) - 1
     sd1, sd2 = np.std(x1, ddof=1, axis=0), np.std(x2, ddof=1, axis=0)
@@ -128,7 +127,7 @@ def overall_auroc(X: DataFrame, y: FlatArray, statistic: str = "mean") -> float:
     return float(summary(np.array(aucs).ravel()))
 
 
-def mahalanobi(X: DataFrame, y: FlatArray, center: str = "mean"):
+def mahalanobi(X: DataFrame, y: FlatArray, center: str = "mean") -> float:
     """
 
     Parameters
@@ -151,7 +150,33 @@ def mahalanobi(X: DataFrame, y: FlatArray, center: str = "mean"):
     """
     if center not in ["mean", "median"]:
         raise ValueError("Must use either 'mean' or 'median' for `center`.")
-    pass
+    raise NotImplementedError()
+
+
+def scaled_distance(X: DataFrame, y: FlatArray, center: str = "mean") -> float:
+    """Compute the Euclidean distance between the centers of the two subgroups after rescaling via
+    statistics computed over all samples (both groups).
+
+    Parameters
+    ----------
+    X: DataFrame
+        DataFrame with shape (n_samples, n_features), and no target variable included
+
+    y: DataFrame
+        DataFrame, Series, or ndarray with shape (n_samples,) and only two unique values (0, 1).
+
+    center: "mean" | "median"
+        Which statistic of central tendency to use in re-scaling and for calculating cluter centers.
+    """
+    if center not in ["mean", "median"]:
+        raise ValueError("Must use either 'mean' or 'median' for `center`.")
+    x = np.asmatrix(np.copy(X))
+    summary = np.mean if center == "mean" else np.median
+    m, sd = summary(x, axis=0), np.std(X, axis=0, ddof=1)
+    x -= m
+    x /= sd
+    x1, x2 = x[y == 0], x[y == 1]
+    return float(np.linalg.norm(summary(x2, axis=0) - summary(x1, axis=0)))
 
 
 def separations(X: DataFrame, y: Union[DataFrame, Series, ndarray]) -> DataFrame:
@@ -170,3 +195,142 @@ def separations(X: DataFrame, y: Union[DataFrame, Series, ndarray]) -> DataFrame
     -------
     val1: Any
     """
+
+def select_features(X: ndarray, percent: float) -> Tuple[ndarray, ndarray]:
+    """Return a copy of X with only `percent` of the total features included"""
+    if percent >= 1.0:
+        return np.copy(X), np.arange(X.shape[1], dtype=int)
+    if percent <= 0:
+        raise ValueError("`percent` must be a float in [0, 1].")
+    n_features = X.shape[1]
+    n_select = np.ceil(percent * n_features).astype(int).item()
+    idx = np.random.choice(np.arange(n_features, dtype=int), n_select)
+    return np.copy(X[:, idx]), idx
+
+
+
+def get_percent_acc_consistency(
+    model: Type,
+    model_args: Dict,
+    X: ndarray,
+    y: ndarray,
+    percent: float,
+    kfold_reps: int,
+    X_test: ndarray = None,
+    y_test: ndarray = None,
+    cpus: int = 4,
+) -> Tuple[float, float]:
+    """
+    Parameters
+    ----------
+    percent: float
+        Between 0 and 100
+    """
+    X_select, idx = select_features(X, percent / 100)
+    if X_test is not None:
+        X_test = np.copy(X_test[:, idx])
+    if X_select.shape[1] < 1:
+        raise RuntimeError("Failed to select features.")
+
+    if (X_test is not None) and (y_test is not None):
+        errcon = ErrorConsistencyKFoldHoldout(
+            model=model,
+            x=X_select,
+            y=y,
+            n_splits=5,
+            model_args=model_args,
+            stratify=True,
+            empty_unions="drop",
+        )
+        results = errcon.evaluate(
+            X_test,
+            y_test,
+            repetitions=kfold_reps,
+            save_test_accs=True,
+            save_fold_accs=False,
+            parallel_reps=cpus,
+            loo_parallel=cpus,
+            turbo=True,
+            show_progress=False,
+        )
+        return np.mean(results.test_accs), np.mean(results.consistencies)
+    errcon_internal = ErrorConsistencyKFoldInternal(
+        model=model,
+        x=X_select,
+        y=y,
+        n_splits=5,
+        model_args=model_args,
+        stratify=True,
+        empty_unions="drop",
+    )
+    results = errcon_internal.evaluate(
+        repetitions=kfold_reps,
+        save_test_accs=True,
+        save_fold_accs=False,
+        parallel_reps=cpus,
+        loo_parallel=cpus,
+        turbo=True,
+        show_progress=False,
+    )
+    return np.mean(results.test_accs), np.mean(results.consistencies)
+
+
+def holdout_downsampling(args: Namespace) -> None:
+    disable = not args.pbar
+    dataset = dataset_from_args(args)
+    classifier = classifier_from_args(args)
+    percents = np.sort(np.random.uniform(args.percent_min, args.percent_max, args.n_percents))
+    kfold_reps = args.kfold_reps
+    n_rows = len(percents)
+    outdir = args.results_dir
+    if not outdir.exists():
+        os.makedirs(outdir)
+    cpus = args.cpus
+
+    x, y = DATA[dataset]
+    print(f"Preparing {dataset} data...")
+    if args.validation == "external":
+        x, x_test, y, y_test = train_test_split(x, y, test_size=0.2)
+    else:
+        x_test = y_test = None
+    model, model_args_dict = CLASSIFIERS[classifier]
+    model_args = model_args_dict[dataset]
+    print(f"Testing {classifier} classifier on {dataset} data...")
+    data = np.full([n_rows, 3], -1, dtype=float)
+    desc_percent = "Downsampling at {:.1f}%"
+    pbar_percent = tqdm(
+        desc=desc_percent.format(percents[0]), total=len(percents), leave=False, disable=disable
+    )
+    row = 0
+    for i, percent in enumerate(percents):
+        pbar_percent.set_description(desc_percent.format(percent))
+        acc, cons = get_percent_acc_consistency(
+            model, model_args, x, y, percent, kfold_reps, x_test, y_test, cpus
+        )
+        data[row] = [percent, acc, cons]
+        row += 1
+        pbar_percent.update()
+    pbar_percent.close()
+    print("row:", row)
+    assert row == n_rows
+    df = DataFrame(
+        data=data, columns=["Percent", "Accuracy", "Consistency"], index=range(n_rows), dtype=float
+    )
+    print(df)
+    classifier = classifier.replace(" ", "_")
+    val = "holdout" if args.validation == "external" else "internal"
+    outfile = outdir / f"{dataset}_{classifier}__k-fold-{val}.json"
+    df.to_json(outfile)
+
+if __name__ == "__main__":
+    parser = argparse_setup()
+    # args = parser.parse_args()
+    args = parser.parse_args(
+        "--classifier lr --dataset diabetes --kfold-reps 10 --n-percents 50 --results-dir analysis/results/testresults --pbar --cpus 8 --validation internal".split(
+            " "
+        )
+    )
+    filterwarnings("ignore", message="Got `batch_size`", category=UserWarning)
+    filterwarnings("ignore", message="Stochastic Optimizer")
+    filterwarnings("ignore", message="Liblinear failed to converge")
+    holdout_downsampling(args)
