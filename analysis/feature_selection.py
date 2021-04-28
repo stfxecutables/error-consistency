@@ -218,7 +218,9 @@ def get_percent_acc_consistency(
     X = np.array(np.copy(X))
     X_select, idx = select_features(X, percent / 100)
     if X_test is not None:
-        X_test = np.copy(np.array(X_test[:, idx]))
+        if isinstance(X_test, DataFrame):
+            X_test = X_test.to_numpy()
+        X_test = np.copy(X_test[:, idx])
     if X_select.shape[1] < 1:
         raise RuntimeError("Failed to select features.")
 
@@ -243,7 +245,12 @@ def get_percent_acc_consistency(
             turbo=True,
             show_progress=False,
         )
-        return np.mean(results.test_accs), np.mean(results.consistencies)
+        return (
+            np.mean(results.test_accs),
+            np.mean(results.consistencies),
+            np.std(results.consistencies, ddof=1),
+            X_select,
+        )
     errcon_internal = ErrorConsistencyKFoldInternal(
         model=model,
         x=X_select,
@@ -340,7 +347,7 @@ if __name__ == "__main__":
             "--results-dir analysis/results/testresults "
             "--pbar "
             "--cpus 8 "
-            "--validation internal"
+            "--validation external"
         )
         args = parser.parse_args(cmd_args.split(" "))
         holdout_downsampling(args)
