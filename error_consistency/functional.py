@@ -145,7 +145,7 @@ def loo_consistencies(
     show_progress: bool = True,
 ) -> ndarray:
     L = len(y_errs)
-    loo_sets = combinations(y_errs, L - 1)  # leave-one out
+    loo_sets = list(combinations(y_errs, L - 1))  # leave-one out
     if parallel is not False:
         cpus = cpu_count() if parallel is True else int(parallel)
         args = [(lsets, empty_unions, norm) for lsets in loo_sets]

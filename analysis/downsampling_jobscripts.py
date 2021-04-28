@@ -5,7 +5,14 @@ from typing import List, Tuple
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from analysis.constants import KFOLD_REPS, N_PERCENTS, DOWNSAMPLE_RESULTS_DIR
+from analysis.constants import (
+    Analysis,
+    AnalysisType,
+    FEATURE_RESULTS_DIR,
+    KFOLD_REPS,
+    N_PERCENTS,
+    DOWNSAMPLE_RESULTS_DIR,
+)
 
 CLASSIFIER_CHOICES = ["knn1", "knn3", "knn5", "knn10", "lr", "svm", "rf", "ada", "mlp"]
 DATASET_CHOICES = ["diabetes", "park", "trans", "spect"]
@@ -15,11 +22,9 @@ if not SCRIPT_OUTDIR.exists():
 
 
 def generate_script(
+    analysis: AnalysisType = "downsample",
     time: str = "08:00:00",
     mlp_time: str = "4-00:00:00",
-    job_name: str = "downsampling",
-    mlp_job_name: str = "downsampling_mlp",
-    results_dir: Path = DOWNSAMPLE_RESULTS_DIR,
     kfold_reps: int = KFOLD_REPS,
     n_percents: int = N_PERCENTS,
     cpus: int = 8,
@@ -27,7 +32,21 @@ def generate_script(
 ) -> Tuple[str, str]:
     lines: List[str]
     mlp_lines: List[str]
-    template = '"$PYTHON $PROJECT/analysis/downsampling.py --classifier={classifier} --dataset={dataset} --kfold-reps={kfold_reps} --n-percents={n_percents} --results-dir={results_dir} --cpus={cpus}"'
+
+    is_down = analysis is Analysis.downsample
+    pythonfile = "downsampling.py" if is_down else "feature_selection.py"
+    job_name = "downsampling" if is_down else "feature"
+    mlp_job_name = f"{job_name}_mlp"
+    results_dir = DOWNSAMPLE_RESULTS_DIR if is_down else FEATURE_RESULTS_DIR
+    template = (
+        f'"$PYTHON $PROJECT/analysis/{pythonfile} '
+        "--classifier={classifier} "
+        "--dataset={dataset} "
+        "--kfold-reps={kfold_reps} "
+        "--n-percents={n_percents} "
+        "--results-dir={results_dir} "
+        '--cpus={cpus}"'
+    )
     lines, mlp_lines = [], []
     for dataset in DATASET_CHOICES:
         for classifier in CLASSIFIER_CHOICES:
@@ -83,18 +102,20 @@ eval ${{commands["$SLURM_ARRAY_TASK_ID"]}}
 """
     all_script = f"{all_header}{script.format(bash_array)}"
     mlp_script = f"{mlp_header}{script.format(bash_array_mlp)}"
-    with open(script_outdir / "submit_all_downsampling.sh", mode="w") as file:
+    all_out = script_outdir / f"submit_all_{job_name}.sh"
+    mlp_out = script_outdir / f"submit_mlp_{job_name}.sh"
+    with open(all_out, mode="w") as file:
         file.write(all_script)
-    print(f"Saved downsampling script to {script_outdir / 'submit_all_downsampling.sh'}")
-    with open(script_outdir / "submit_mlp_downsampling.sh", mode="w") as file:
+    print(f"Saved downsampling script to {all_out}")
+    with open(mlp_out, mode="w") as file:
         file.write(mlp_script)
-    print(f"Saved mlp downsampling script to {script_outdir / 'submit_mlp_downsampling.sh'}")
+    print(f"Saved mlp downsampling script to {mlp_out}")
 
     return all_script, mlp_script
 
 
 if __name__ == "__main__":
     print(f"Will save scripts in {SCRIPT_OUTDIR}")
-    scripts = generate_script(kfold_reps=50, n_percents=200, cpus=8)
+    scripts = generate_script("feature", kfold_reps=50, n_percents=200, cpus=8)
     print(scripts[0])
     print(scripts[1])

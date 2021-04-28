@@ -45,9 +45,11 @@ def validate_kfold(
     :meta private:
     """
     # don't work with original arrays which may have sample index in strange location
-    idx = np.arange(0, int(x.shape[x_sample_dim]), dtype=int)
+    length = int(x.shape[x_sample_dim])
+    idx = np.arange(0, length, dtype=int)
     # convert to labels if we have a one-hot (will fail for dummy coding)
-    y_split = np.argmax(y, axis=1 - int(np.abs(y_sample_dim))) if y.ndim == 2 else y
+    # y_split = np.argmax(y, axis=1 - int(np.abs(y_sample_dim))) if y.ndim == 2 else y
+    y_split = np.argmax(y, axis=1 - np.abs(y_sample_dim).astype(int)) if y.ndim == 2 else y
 
     # can't trust kfold shuffling in multiprocessing, shuffle ourselves
     generator.shuffle(idx)

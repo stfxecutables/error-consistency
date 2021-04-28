@@ -1151,6 +1151,8 @@ class ErrorConsistencyKFoldInternal(ErrorConsistencyBase):
         consistencies, matrix, unpredictables, predictables, loo_consistencies = errcon_results
         numerator = np.sum(unpredictables)
         total = numerator / np.sum(predictables) if numerator > 0 else 0
+        if len(loo_consistencies) == 0:
+            loo_consistencies = np.nan
 
         return ConsistencyResults(
             consistencies=consistencies,

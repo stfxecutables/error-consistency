@@ -206,13 +206,15 @@ def get_percent_acc_consistency(
     X_test: ndarray = None,
     y_test: ndarray = None,
     cpus: int = 4,
-) -> Tuple[float, float, ndarray]:
+) -> Tuple[float, float, float, ndarray]:
     """
     Parameters
     ----------
     percent: float
         Between 0 and 100
     """
+    EMPTY_UNIONS = "drop"
+    # EMPTY_UNIONS = 1
     X = np.array(np.copy(X))
     X_select, idx = select_features(X, percent / 100)
     if X_test is not None:
@@ -228,7 +230,7 @@ def get_percent_acc_consistency(
             n_splits=5,
             model_args=model_args,
             stratify=True,
-            empty_unions="drop",
+            empty_unions=EMPTY_UNIONS,
         )
         results = errcon.evaluate(
             X_test,
@@ -249,7 +251,7 @@ def get_percent_acc_consistency(
         n_splits=5,
         model_args=model_args,
         stratify=True,
-        empty_unions="drop",
+        empty_unions=EMPTY_UNIONS,
     )
     results = errcon_internal.evaluate(
         repetitions=kfold_reps,
@@ -260,7 +262,12 @@ def get_percent_acc_consistency(
         turbo=True,
         show_progress=False,
     )
-    return np.mean(results.test_accs), np.mean(results.consistencies), X_select
+    return (
+        np.mean(results.test_accs),
+        np.mean(results.consistencies),
+        np.std(results.consistencies, ddof=1),
+        X_select,
+    )
 
 
 def holdout_downsampling(args: Namespace) -> None:
@@ -285,7 +292,7 @@ def holdout_downsampling(args: Namespace) -> None:
     model_args = model_args_dict[dataset]
     print(f"Testing {classifier} classifier on {dataset} data...")
     seps = separations(x, y)
-    data = np.full([n_rows, 3 + seps.shape[1]], -1, dtype=float)
+    data = np.full([n_rows, 4 + seps.shape[1]], -1, dtype=float)
     desc_percent = "Downsampling at {:.1f}%"
     pbar_percent = tqdm(
         desc=desc_percent.format(percents[0]), total=len(percents), leave=False, disable=disable
@@ -293,11 +300,11 @@ def holdout_downsampling(args: Namespace) -> None:
     row = 0
     for i, percent in enumerate(percents):
         pbar_percent.set_description(desc_percent.format(percent))
-        acc, cons, x_sel = get_percent_acc_consistency(
+        acc, cons, sd, x_sel = get_percent_acc_consistency(
             model, model_args, x, y, percent, kfold_reps, x_test, y_test, cpus
         )
         seps = separations(x_sel, y)
-        data[row] = [percent, acc, cons, *(seps.to_numpy().ravel().tolist())]
+        data[row] = [percent, acc, cons, sd, *(seps.to_numpy().ravel().tolist())]
         row += 1
         pbar_percent.update()
     pbar_percent.close()
@@ -305,7 +312,7 @@ def holdout_downsampling(args: Namespace) -> None:
     assert row == n_rows
     df = DataFrame(
         data=data,
-        columns=["Percent", "Accuracy", "Consistency", *seps.columns],
+        columns=["Percent", "Accuracy", "Consistency", "EC (sd)", *seps.columns],
         index=range(n_rows),
         dtype=float,
     )
@@ -317,22 +324,23 @@ def holdout_downsampling(args: Namespace) -> None:
 
 
 if __name__ == "__main__":
-    cmd_args = (
-        "--classifier lr "
-        "--dataset diabetes "
-        "--kfold-reps 5 "
-        "--n-percents 100 "
-        "--percent-min 10 "
-        "--results-dir analysis/results/testresults "
-        "--pbar "
-        "--cpus 8 "
-        "--validation internal"
-    )
-    parser = argparse_setup("feature")
-    # args = parser.parse_args()
-    args = parser.parse_args(cmd_args.split(" "))
     filterwarnings("error")
-    # filterwarnings("ignore", message="Got `batch_size`", category=UserWarning)
-    # filterwarnings("ignore", message="Stochastic Optimizer")
-    # filterwarnings("ignore", message="Liblinear failed to converge")
-    holdout_downsampling(args)
+    filterwarnings("ignore", message="`np.int` is a deprecated alias", category=DeprecationWarning)
+    parser = argparse_setup("feature")
+    if os.environ.get("CC_CLUSTER") is not None:
+        args = parser.parse_args()
+        holdout_downsampling(args)
+    else:
+        cmd_args = (
+            "--classifier lr "
+            "--dataset diabetes "
+            "--kfold-reps 10 "
+            "--n-percents 100 "
+            "--percent-min 10 "
+            "--results-dir analysis/results/testresults "
+            "--pbar "
+            "--cpus 8 "
+            "--validation internal"
+        )
+        args = parser.parse_args(cmd_args.split(" "))
+        holdout_downsampling(args)
