@@ -1,4 +1,5 @@
 import os
+import sys
 from enum import Enum
 from itertools import repeat
 from pathlib import Path
@@ -13,7 +14,8 @@ from sklearn.neighbors import KNeighborsClassifier as KNN
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
 
-from tests.loading import load_diabetes, load_park, load_SPECT, load_trans
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from analysis.loading import load_diabetes, load_park, load_SPECT, load_trans
 
 
 DOWNSAMPLE_OUTDIR = Path(__file__).resolve().parent / "results/downsample"

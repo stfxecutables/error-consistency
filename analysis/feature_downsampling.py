@@ -5,6 +5,7 @@ from tqdm import tqdm
 from typing import Dict, Tuple, Type, Union
 
 import numpy as np
+import pandas as pd
 from argparse import Namespace
 from numpy import ndarray
 from pandas import DataFrame, Series
@@ -57,7 +58,7 @@ def overall_cohen_d(X: DataFrame, y: FlatArray, statistic: str = "mean") -> floa
     sd_pools = np.sqrt((n1 * sd1 + n2 * sd2) / (n1 + n2))
     ds = np.abs(np.mean(x1, axis=0) - np.mean(x2, axis=0)) / sd_pools
     summary = np.mean if statistic == "mean" else np.median
-    return float(summary(ds.ravel()))
+    return float(summary(np.array(ds).ravel()))
 
 
 def overall_auroc(X: DataFrame, y: FlatArray, statistic: str = "mean") -> float:
@@ -96,7 +97,8 @@ def overall_auroc(X: DataFrame, y: FlatArray, statistic: str = "mean") -> float:
     """
     if statistic not in ["mean", "median"]:
         raise ValueError("Must use either 'mean' or 'median' for `statistic`.")
-    aucs = [roc_auc_score(y, X[x]) for x in X.columns]
+    X = np.copy(X)
+    aucs = [roc_auc_score(y, X[:, i]) for i in range(X.shape[1])]
     aucs = [np.abs(auc - 0.5) for auc in aucs]
     summary = np.mean if statistic == "mean" else np.median
     return float(summary(np.array(aucs).ravel()))
@@ -141,7 +143,7 @@ def scaled_distance(X: DataFrame, y: FlatArray, center: str = "mean") -> float:
         DataFrame, Series, or ndarray with shape (n_samples,) and only two unique values (0, 1).
 
     center: "mean" | "median"
-        Which statistic of central tendency to use in re-scaling and for calculating cluter centers.
+        Which statistic of central tendency to use in re-scaling and for calculating cluster centers.
     """
     if center not in ["mean", "median"]:
         raise ValueError("Must use either 'mean' or 'median' for `center`.")
@@ -170,6 +172,17 @@ def separations(X: DataFrame, y: Union[DataFrame, Series, ndarray]) -> DataFrame
     -------
     val1: Any
     """
+    return DataFrame(
+        {
+            "d": [overall_cohen_d(X, y, "mean")],
+            "d-med": [overall_cohen_d(X, y, "median")],
+            "AUC": [overall_auroc(X, y, "mean")],
+            "AUC-med": [overall_auroc(X, y, "median")],
+            "delta": [scaled_distance(X, y, "mean")],
+            "delta-med": [scaled_distance(X, y, "median")],
+        }
+    )
+
 
 def select_features(X: ndarray, percent: float) -> Tuple[ndarray, ndarray]:
     """Return a copy of X with only `percent` of the total features included"""
@@ -193,7 +206,7 @@ def get_percent_acc_consistency(
     X_test: ndarray = None,
     y_test: ndarray = None,
     cpus: int = 4,
-) -> Tuple[float, float]:
+) -> Tuple[float, float, ndarray]:
     """
     Parameters
     ----------
@@ -247,7 +260,7 @@ def get_percent_acc_consistency(
         turbo=True,
         show_progress=False,
     )
-    return np.mean(results.test_accs), np.mean(results.consistencies)
+    return np.mean(results.test_accs), np.mean(results.consistencies), X_select
 
 
 def holdout_downsampling(args: Namespace) -> None:
@@ -271,7 +284,8 @@ def holdout_downsampling(args: Namespace) -> None:
     model, model_args_dict = CLASSIFIERS[classifier]
     model_args = model_args_dict[dataset]
     print(f"Testing {classifier} classifier on {dataset} data...")
-    data = np.full([n_rows, 3], -1, dtype=float)
+    seps = separations(x, y)
+    data = np.full([n_rows, 3 + seps.shape[1]], -1, dtype=float)
     desc_percent = "Downsampling at {:.1f}%"
     pbar_percent = tqdm(
         desc=desc_percent.format(percents[0]), total=len(percents), leave=False, disable=disable
@@ -279,17 +293,21 @@ def holdout_downsampling(args: Namespace) -> None:
     row = 0
     for i, percent in enumerate(percents):
         pbar_percent.set_description(desc_percent.format(percent))
-        acc, cons = get_percent_acc_consistency(
+        acc, cons, x_sel = get_percent_acc_consistency(
             model, model_args, x, y, percent, kfold_reps, x_test, y_test, cpus
         )
-        data[row] = [percent, acc, cons]
+        seps = separations(x_sel, y)
+        data[row] = [percent, acc, cons, *(seps.to_numpy().ravel().tolist())]
         row += 1
         pbar_percent.update()
     pbar_percent.close()
     print("rows:", row)
     assert row == n_rows
     df = DataFrame(
-        data=data, columns=["Percent", "Accuracy", "Consistency"], index=range(n_rows), dtype=float
+        data=data,
+        columns=["Percent", "Accuracy", "Consistency", *seps.columns],
+        index=range(n_rows),
+        dtype=float,
     )
     print(df)
     classifier = classifier.replace(" ", "_")
@@ -303,11 +321,11 @@ if __name__ == "__main__":
         "--classifier lr "
         "--dataset diabetes "
         "--kfold-reps 5 "
-        "--n-percents 20 "
-        "--percent-min 20 "
+        "--n-percents 100 "
+        "--percent-min 10 "
         "--results-dir analysis/results/testresults "
         "--pbar "
-        "--cpus 4 "
+        "--cpus 8 "
         "--validation internal"
     )
     parser = argparse_setup("feature")

@@ -1,26 +1,16 @@
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from typing import Dict, Tuple, Type
 
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-import seaborn as sbn
-from numpy import ndarray
 from pandas import DataFrame, Series
+from sklearn.ensemble import AdaBoostClassifier as AdaBoost
+from sklearn.ensemble import RandomForestClassifier as RF
+from sklearn.linear_model import LogisticRegression as LR
 from sklearn.neighbors import KNeighborsClassifier as KNN
 from sklearn.svm import SVC
-from sklearn.linear_model import LogisticRegression as LR
-from sklearn.ensemble import RandomForestClassifier as RF
-from sklearn.ensemble import AdaBoostClassifier as AdaBoost
-from sklearn.model_selection import train_test_split
-
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
-from typing import cast, no_type_check
-from typing_extensions import Literal
-
 
 # fmt: off
-DATAROOT = Path(__file__).resolve().parent / "datasets"
+DATAROOT = Path(__file__).resolve().parent.parent / "tests/datasets"
 
 DIABETES    = DATAROOT / "diabetes/diabetes.csv"  # noqa
 PARK        = DATAROOT / "parkinsons/parkinsons.data"  # noqa

@@ -22,7 +22,9 @@ from error_consistency.consistency import (
     ErrorConsistencyKFoldInternal,
 )
 from error_consistency.model import Model
-from tests.loading import CLASSIFIERS, DATA, OUTDIR
+
+sys.path.append(str(Path(__file__).resolve().parent.parent / "analysis"))
+from analysis.loading import CLASSIFIERS, DATA, OUTDIR
 
 PLOT_OUTDIR = OUTDIR / "plots"
 RESULTS_DIR = OUTDIR / "dfs"
@@ -148,6 +150,7 @@ def test_holdout_downsampling(capsys: Any) -> None:
                 )
                 df.to_json(outfile)
 
+
 def plot_acc_cons(df: DataFrame, classifier: str, ax: plt.Axes) -> None:
     x = (df["Percent"] * 100).to_numpy().ravel()
     x_jitter = x + np.random.uniform(0, np.mean(np.diff(PERCENTS * 100)) / 2, len(x))
@@ -162,6 +165,7 @@ def plot_acc_cons(df: DataFrame, classifier: str, ax: plt.Axes) -> None:
     ax.set_xlabel("Downsampling percentage")
     ax.set_ylabel("Accuracy or Consistency")
     ax.set_title(f"{classifier} classifier")
+
 
 def test_holdout_downsampling_plots(capsys: Any) -> None:
     files = sorted(RESULTS_DIR.rglob("Diabetes*.json"))

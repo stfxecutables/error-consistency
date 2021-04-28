@@ -24,7 +24,9 @@ from error_consistency.consistency import (
     ErrorConsistencyKFoldHoldout,
     ErrorConsistencyKFoldInternal,
 )
-from tests.loading import CLASSIFIERS, DATA, OUTDIR
+
+sys.path.append(str(Path(__file__).resolve().parent.parent / "analysis"))
+from analysis.loading import CLASSIFIERS, DATA, OUTDIR
 
 
 def test_classifiers_holdout(capsys: Any) -> None:
