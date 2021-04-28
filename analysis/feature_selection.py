@@ -147,9 +147,9 @@ def scaled_distance(X: DataFrame, y: FlatArray, center: str = "mean") -> float:
     """
     if center not in ["mean", "median"]:
         raise ValueError("Must use either 'mean' or 'median' for `center`.")
-    x = np.array(np.copy(X))
+    x = np.array(np.copy(X), dtype=float)
     summary = np.mean if center == "mean" else np.median
-    m, sd = summary(x, axis=0), np.std(X, axis=0, ddof=1)
+    m, sd = summary(x, axis=0).astype(float), np.std(X, axis=0, ddof=1).astype(float)
     x -= m
     x /= sd
     x1, x2 = x[y == 0], x[y == 1]
