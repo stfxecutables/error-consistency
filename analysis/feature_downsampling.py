@@ -51,7 +51,7 @@ def overall_cohen_d(X: DataFrame, y: FlatArray, statistic: str = "mean") -> floa
     is invalid (e.g. each feature has its own unit of measure, and allowing "-1 f1" to cancel out `1
     f2" for units "f1" and "f2" is invalid.
     """
-    data = np.asmatrix(np.copy(X))
+    data = np.array(np.copy(X))
     x1, x2 = data[y == 0], data[y == 1]
     n1, n2 = len(x1) - 1, len(x2) - 1
     sd1, sd2 = np.std(x1, ddof=1, axis=0), np.std(x2, ddof=1, axis=0)
@@ -147,7 +147,7 @@ def scaled_distance(X: DataFrame, y: FlatArray, center: str = "mean") -> float:
     """
     if center not in ["mean", "median"]:
         raise ValueError("Must use either 'mean' or 'median' for `center`.")
-    x = np.asmatrix(np.copy(X))
+    x = np.array(np.copy(X))
     summary = np.mean if center == "mean" else np.median
     m, sd = summary(x, axis=0), np.std(X, axis=0, ddof=1)
     x -= m
@@ -213,10 +213,10 @@ def get_percent_acc_consistency(
     percent: float
         Between 0 and 100
     """
-    X = np.asmatrix(np.copy(X))
+    X = np.array(np.copy(X))
     X_select, idx = select_features(X, percent / 100)
     if X_test is not None:
-        X_test = np.copy(np.asmatrix(X_test[:, idx]))
+        X_test = np.copy(np.array(X_test[:, idx]))
     if X_select.shape[1] < 1:
         raise RuntimeError("Failed to select features.")
 
@@ -331,7 +331,8 @@ if __name__ == "__main__":
     parser = argparse_setup("feature")
     # args = parser.parse_args()
     args = parser.parse_args(cmd_args.split(" "))
-    filterwarnings("ignore", message="Got `batch_size`", category=UserWarning)
-    filterwarnings("ignore", message="Stochastic Optimizer")
-    filterwarnings("ignore", message="Liblinear failed to converge")
+    filterwarnings("error")
+    # filterwarnings("ignore", message="Got `batch_size`", category=UserWarning)
+    # filterwarnings("ignore", message="Stochastic Optimizer")
+    # filterwarnings("ignore", message="Liblinear failed to converge")
     holdout_downsampling(args)
