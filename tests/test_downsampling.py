@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict, Tuple, Type
+from typing import Any, Dict, Tuple, Type, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,6 +32,8 @@ PERCENTS = np.linspace(0, 1, 21)[1:-1]  # 5, 10, ..., 95
 COLS = [f"{e:1.0f}" for e in PERCENTS * 100]
 N_ROWS = len(COLS) * REPS_PER_PERCENT
 
+ErrCon = Union[ErrorConsistencyKFoldHoldout, ErrorConsistencyKFoldInternal]
+
 
 def best_rect(m: int) -> Tuple[int, int]:
     """returns dimensions (smaller, larger) of closest rectangle"""
@@ -56,7 +58,7 @@ def get_percent_acc_consistency(
 ) -> Tuple[float, float]:
     x_down, _, y_down, _ = train_test_split(x, y, train_size=percent)
     if (x_test is not None) and (y_test is not None):
-        errcon = ErrorConsistencyKFoldHoldout(
+        errcon: ErrCon = ErrorConsistencyKFoldHoldout(
             model=model,
             x=x_down,
             y=y_down,
@@ -65,9 +67,9 @@ def get_percent_acc_consistency(
             stratify=True,
             empty_unions="drop",
         )
-        results = errcon.evaluate(
-            x_test,
-            y_test,
+        results = errcon.evaluate(  # type: ignore
+            x_test=x_test,
+            y_test=y_test,
             repetitions=kfold_reps,
             save_test_accs=True,
             save_fold_accs=False,
@@ -76,7 +78,7 @@ def get_percent_acc_consistency(
             turbo=True,
             show_progress=False,
         )
-        return np.mean(results.test_accs), np.mean(results.consistencies)
+        return np.mean(results.test_accs), np.mean(results.consistencies)  # type: ignore
     errcon = ErrorConsistencyKFoldInternal(
         model=model,
         x=x_down,
@@ -95,7 +97,7 @@ def get_percent_acc_consistency(
         turbo=True,
         show_progress=False,
     )
-    return np.mean(results.test_accs), np.mean(results.consistencies)
+    return np.mean(results.test_accs), np.mean(results.consistencies)  # type: ignore
 
 
 # NOTE: for parkinsons and SPECT data, are going to get
@@ -160,7 +162,6 @@ def plot_acc_cons(df: DataFrame, classifier: str, ax: plt.Axes) -> None:
 
 def test_holdout_downsampling_plots(capsys: Any) -> None:
     files = sorted(RESULTS_DIR.rglob("Diabetes*.json"))
-    datasets = [file.name[: file.name.find("_")] for file in files]
     classifiers = [file.name.split("_")[1] for file in files]
     dfs = [pd.read_json(file) for file in files]
     nrows, ncols = best_rect(len(dfs))

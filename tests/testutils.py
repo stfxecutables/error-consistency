@@ -36,3 +36,4 @@ def random_preds(
         onehot = OneHotEncoder(sparse=False, dtype=int).fit(labels.reshape(len(labels), 1))
         preds = [onehot.transform(pred_label.reshape(-1, 1)) for pred_label in pred_labels]
         return preds, onehot.transform(true_labels.reshape(-1, 1))
+    raise ValueError("Invalid number of dimensions.")

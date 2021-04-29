@@ -1,11 +1,13 @@
 import numpy as np
 import pytest
+from typing import no_type_check
 
 from error_consistency.functional import error_consistencies, get_y_error
 
 from tests.testutils import random_preds
 
 
+@no_type_check
 @pytest.mark.fast
 def test_get_y_error() -> None:
     # test throws errors
@@ -25,7 +27,7 @@ def test_get_consistencies() -> None:
     for p in range(2, 100):
         y_preds, y_true = random_preds(1000, 100, n_preds=p, dims=1)
         cs, matrix, unpredictable, predictable, loocs = error_consistencies(
-            y_preds, y_true, sample_dim=0, turbo=True
+            y_preds, y_true, sample_dim=0, turbo=True  # type: ignore
         )
         assert len(cs) == p * (p - 1) / 2
         assert matrix.shape == (p, p)

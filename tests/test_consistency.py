@@ -155,7 +155,7 @@ class TestInternalConsistency:
                 save_test_predictions=True,
                 turbo=True,
             )
-            for preds in results.test_predictions:
+            for preds in results.test_predictions:  # type: ignore
                 assert -1 not in preds.ravel()
 
             print("Mean pairwise consistency ....... ", np.round(np.mean(results.consistencies), 4))
@@ -184,7 +184,7 @@ class TestInternalConsistency:
                 save_test_predictions=True,
                 turbo=True,
             )
-            for preds in results.test_predictions:
+            for preds in results.test_predictions:  # type: ignore
                 assert -1 not in preds.ravel()
 
     def test_slow(self, capsys: Any) -> None:
@@ -203,7 +203,7 @@ class TestInternalConsistency:
                 save_test_predictions=True,
                 turbo=False,
             )
-            for preds in results.test_predictions:
+            for preds in results.test_predictions:  # type: ignore
                 assert -1 not in preds.ravel()
 
     def test_parallel_reps(self, capsys: Any) -> None:
@@ -222,7 +222,7 @@ class TestInternalConsistency:
                 parallel_reps=True,
                 turbo=True,
             )
-            for preds in results.test_predictions:
+            for preds in results.test_predictions:  # type: ignore
                 assert -1 not in preds.ravel()
             print("Mean pairwise consistency ....... ", np.round(np.mean(results.consistencies), 4))
             print(
@@ -252,7 +252,7 @@ class TestInternalConsistency:
                 loo_parallel=True,
                 turbo=True,
             )
-            for preds in results.test_predictions:
+            for preds in results.test_predictions:  # type: ignore
                 assert -1 not in preds.ravel()
             print("Mean pairwise consistency ....... ", np.round(np.mean(results.consistencies), 4))
             print(
