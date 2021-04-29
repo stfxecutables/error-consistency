@@ -224,7 +224,7 @@ if __name__ == "__main__":
     parser = argparse_setup()
     # args = parser.parse_args()
     args = parser.parse_args(
-        "--classifier lr --dataset diabetes --kfold-reps 10 --n-percents 50 --results-dir analysis/results/testresults --pbar --cpus 8 --validation internal".split(
+        "--classifier lr --dataset diabetes --kfold-reps 10 --n-percents 50 --results-dir analysis/results/test_results --pbar --cpus 8 --validation internal".split(
             " "
         )
     )

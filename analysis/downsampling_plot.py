@@ -101,6 +101,6 @@ if __name__ == "__main__":
             continue
         plot_results(file, df, jitter=False)
     print(f"Saved plots to {PDF_DIR.parent}")
-    # FILE = Path("/home/derek/Desktop/error-consistency/analysis/results/testresults/Diabetes_Logistic_Regression__k-fold-holdout_downsample.json")
+    # FILE = Path("/home/derek/Desktop/error-consistency/analysis/results/test_results/Diabetes_Logistic_Regression__k-fold-holdout_downsample.json")
     # df = pd.read_json(FILE)
     # plot_results(FILE, df, jitter=False, curve=True, show=True)

@@ -344,7 +344,7 @@ if __name__ == "__main__":
             "--kfold-reps 10 "
             "--n-percents 100 "
             "--percent-min 10 "
-            "--results-dir analysis/results/testresults "
+            "--results-dir analysis/results/test_results "
             "--pbar "
             "--cpus 8 "
             "--validation external"
