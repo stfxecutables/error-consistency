@@ -30,7 +30,7 @@ def test_classifiers_holdout(capsys: Any) -> None:
                 results = errcon.evaluate(
                     x_test,
                     y_test,
-                    repetitions=500,
+                    repetitions=10,
                     save_test_accs=True,
                     save_fold_accs=True,
                     parallel_reps=True,
@@ -63,7 +63,7 @@ def test_classifiers_internal(capsys: Any) -> None:
                     empty_unions="drop",
                 )
                 results = errcon.evaluate(
-                    repetitions=500,
+                    repetitions=10,
                     save_test_accs=True,
                     save_fold_accs=True,
                     parallel_reps=True,
