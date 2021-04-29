@@ -7,7 +7,10 @@ analysis/covid/ray
 analysis/results/**/*.png
 analysis/results/**/*.pdf
 analysis/job_scripts/submit__eff*.sh
+
+# testing
 tests/datasets/covid-ct
+tests/test_results
 
 
 
