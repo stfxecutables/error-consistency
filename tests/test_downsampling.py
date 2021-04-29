@@ -1,30 +1,21 @@
 import os
-import sys
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
-from tqdm import tqdm
-from typing import cast, no_type_check
-from typing_extensions import Literal
-from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, Tuple, Type
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sbn
 from numpy import ndarray
-from pandas import DataFrame, Series
-import pytest
+from pandas import DataFrame
 from sklearn.model_selection import train_test_split
 from statsmodels.nonparametric.smoothers_lowess import lowess
+from tqdm import tqdm
 
 from error_consistency.consistency import (
     ErrorConsistencyKFoldHoldout,
     ErrorConsistencyKFoldInternal,
 )
-from error_consistency.model import Model
-
-sys.path.append(str(Path(__file__).resolve().parent.parent / "analysis"))
-from analysis.loading import CLASSIFIERS, DATA, OUTDIR
+from error_consistency.testing.loading import CLASSIFIERS, DATA, OUTDIR
 
 PLOT_OUTDIR = OUTDIR / "plots"
 RESULTS_DIR = OUTDIR / "dfs"

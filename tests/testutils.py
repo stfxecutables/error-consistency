@@ -1,10 +1,8 @@
+from typing import List, Tuple, Union
+
 import numpy as np
 from numpy import ndarray
-from sklearn.preprocessing import OneHotEncoder, LabelEncoder
-
-from typing import Any, Dict, List, Optional, Tuple, Union
-from typing import cast, no_type_check
-from typing_extensions import Literal
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 
 
 def random_preds(
@@ -38,4 +36,3 @@ def random_preds(
         onehot = OneHotEncoder(sparse=False, dtype=int).fit(labels.reshape(len(labels), 1))
         preds = [onehot.transform(pred_label.reshape(-1, 1)) for pred_label in pred_labels]
         return preds, onehot.transform(true_labels.reshape(-1, 1))
-

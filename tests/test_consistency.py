@@ -1,14 +1,11 @@
+from typing import Any
+
 import numpy as np
-import pytest
 import pandas as pd
-
-from typing import Any, Dict, List, Optional, Tuple, Union
-from typing import cast, no_type_check
-from typing_extensions import Literal
-
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier as KNN
+
 from error_consistency.consistency import (
     ErrorConsistencyKFoldHoldout,
     ErrorConsistencyKFoldInternal,
@@ -75,7 +72,7 @@ class TestConsistency:
             errcon.evaluate(
                 x_test=X_test,
                 y_test=y_test,
-                repetitions=100,
+                repetitions=10,
                 save_fold_accs=True,
                 save_test_accs=True,
                 save_test_errors=True,
@@ -93,7 +90,7 @@ class TestConsistency:
             results = errcon.evaluate(
                 x_test=X_test,
                 y_test=y_test,
-                repetitions=1000,
+                repetitions=100,
                 save_fold_accs=True,
                 save_test_accs=True,
                 save_test_errors=True,
@@ -122,7 +119,7 @@ class TestConsistency:
             results = errcon.evaluate(
                 x_test=X_test,
                 y_test=y_test,
-                repetitions=1000,
+                repetitions=100,
                 save_fold_accs=True,
                 save_test_accs=True,
                 save_test_errors=True,
@@ -199,7 +196,7 @@ class TestInternalConsistency:
             )
             # for _ in range(10):
             results = errcon.evaluate(
-                repetitions=100,
+                repetitions=10,
                 save_fold_accs=True,
                 save_test_accs=True,
                 save_test_errors=True,
@@ -217,7 +214,7 @@ class TestInternalConsistency:
                 model=KNN, x=X, y=y, n_splits=5, model_args=knn_args
             )
             results = errcon.evaluate(
-                repetitions=1000,
+                repetitions=100,
                 save_fold_accs=True,
                 save_test_accs=True,
                 save_test_errors=True,
@@ -246,7 +243,7 @@ class TestInternalConsistency:
                 model=KNN, x=X, y=y, n_splits=5, model_args=knn_args
             )
             results = errcon.evaluate(
-                repetitions=1000,
+                repetitions=100,
                 save_fold_accs=True,
                 save_test_accs=True,
                 save_test_errors=True,
@@ -289,7 +286,7 @@ class TestClassifiersHoldout:
                 results = errcon.evaluate(
                     x_test=X_test,
                     y_test=y_test,
-                    repetitions=500,
+                    repetitions=100,
                     save_fold_accs=True,
                     save_test_accs=True,
                     save_test_errors=True,
