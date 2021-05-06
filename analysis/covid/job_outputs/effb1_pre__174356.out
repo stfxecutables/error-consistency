@@ -1,2 +1,0 @@
-Starting training efficientnet-b1 with args --version=b1 --pretrain --lr-schedule=cyclic --cyclic-max=1e-1 --cyclic-base=1e-4 --max-epochs=2000 --batch-size=128 --dropout=0.4 --weight-decay=1e-2 --elastic-scale=0.3 --elastic-trans=0.3 --elastic-shear=0.2 --elastic-degree=5 at Tue Mar 16 00:23:49 UTC 2021.
-slurmstepd: error: *** JOB 174356 ON cg002 CANCELLED AT 2021-03-16T00:23:52 ***
