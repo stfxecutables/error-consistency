@@ -14,6 +14,7 @@
    .. autosummary::
    
       ~ConsistencyResults.__init__
+      ~ConsistencyResults.summary
    
    
 
