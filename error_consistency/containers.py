@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import pandas as pd
 from numpy import ndarray
+from pandas import Series, DataFrame
+import numpy as np
 
 
 from typing import List, Optional
@@ -30,6 +33,7 @@ class KFoldResults:
     fitted_model: Model
     score: Optional[ndarray]
     prediction: ndarray
+    test_idx: ndarray
 
 
 @dataclass(eq=False)
@@ -100,3 +104,43 @@ class ConsistencyResults:
     fold_accs: Optional[ndarray] = None
     fold_predictions: Optional[ndarray] = None
     fold_models: Optional[ndarray] = None
+
+    def __str__(self) -> str:
+        info = []
+        info.append(f"Consistencies: {(len(self.consistencies.ravel()))}\n")
+        info.append(f"   Mean:  {np.mean(self.consistencies):0.4f}\n")
+        info.append(f"   SD:    {np.std(self.consistencies, ddof=1):0.4f}\n")
+        info.append(f"   Total: {self.total_consistency:0.4f}\n")
+        info.append(f"   LOO:   {self.leave_one_out_consistency:0.4f}\n")
+        if self.test_accs is not None:
+            accs = self.test_accs.ravel()
+            info.append(f"Test Accuracies: {(len(accs))}\n")
+            info.append(f"   Mean: {np.mean(accs):0.4f}\n")
+            info.append(f"   SD:   {np.std(accs, ddof=1):0.4f}\n")
+        if self.fold_accs is not None:
+            accs = self.fold_accs.ravel()
+            info.append(f"Fold Accuracies: {len(accs)}\n")
+            info.append(f"   Mean: {np.mean(accs):0.4f}\n")
+            info.append(f"   SD:   {np.std(accs, ddof=1):0.4f}\n")
+        return "".join(info)
+
+    def summary(self, name: Optional[str] = None) -> DataFrame:
+        df = DataFrame(
+            {
+                "Mean": [np.mean(self.consistencies.ravel())],
+                "SD": [np.std(self.consistencies.ravel(), ddof=1)],
+                "Total": [self.total_consistency],
+                "LOO": [self.leave_one_out_consistency],
+            },
+            index=[name] if name is not None else [0],
+        )
+        if self.test_accs is not None:
+            accs = self.test_accs.ravel()
+            df["Test-Mean-Acc"] = np.mean(accs)
+            df["Test-SD-Acc"] = np.std(accs, ddof=1)
+        if self.fold_accs is not None:
+            accs = self.fold_accs.ravel()
+            df["Fold-Mean-Acc"] = np.mean(accs)
+            df["Fold-SD-Acc"] = np.std(accs, ddof=1)
+        return df
+

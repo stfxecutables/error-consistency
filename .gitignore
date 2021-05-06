@@ -1,5 +1,18 @@
 # Error-Consistency Specific Ignores
 .vscode
+**/asha*.out
+analysis/covid/logs
+analysis/covid/job_scripts/submit__eff*.sh
+analysis/covid/ray
+analysis/results/**/*.png
+analysis/results/**/*.pdf
+analysis/results/**/*.csv
+analysis/job_scripts/submit__eff*.sh
+data
+
+# testing
+tests/datasets/covid-ct
+tests/test_results
 
 
 

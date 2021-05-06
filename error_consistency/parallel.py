@@ -45,9 +45,11 @@ def validate_kfold(
     :meta private:
     """
     # don't work with original arrays which may have sample index in strange location
-    idx = np.arange(0, int(x.shape[x_sample_dim]), dtype=int)
+    length = int(x.shape[x_sample_dim])
+    idx = np.arange(0, length, dtype=int)
     # convert to labels if we have a one-hot (will fail for dummy coding)
-    y_split = np.argmax(y, axis=1 - int(np.abs(y_sample_dim))) if y.ndim == 2 else y
+    # y_split = np.argmax(y, axis=1 - int(np.abs(y_sample_dim))) if y.ndim == 2 else y
+    y_split = np.argmax(y, axis=1 - np.abs(y_sample_dim).astype(int)) if y.ndim == 2 else y
 
     # can't trust kfold shuffling in multiprocessing, shuffle ourselves
     generator.shuffle(idx)
@@ -69,7 +71,7 @@ def validate_kfold(
             y_val = array_indexer(y, y_sample_dim, val_idx)
             y_pred = model.predict(x_val)
             acc = 1 - np.mean(get_y_error(y_pred, y_val, y_sample_dim))
-        results.append(KFoldResults(model, acc, y_pred))
+        results.append(KFoldResults(model, acc, y_pred, val_idx))
 
     return results
 
@@ -82,6 +84,17 @@ def validate_kfold_imap(args: Any) -> List[KFoldResults]:
 def get_test_predictions(args: Any) -> List[ndarray]:
     """:meta private:"""
     results_list, x_test = args
+    y_preds = []
+    for results in results_list:
+        fitted = results.fitted_model
+        y_pred = fitted.predict(x_test)
+        y_preds.append(y_pred)
+    return y_preds
+
+
+def get_test_predictions_internal(args: Any) -> List[ndarray]:
+    """:meta private:"""
+    results_list = args
     y_preds = []
     for results in results_list:
         fitted = results.fitted_model

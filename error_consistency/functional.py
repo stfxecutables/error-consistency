@@ -140,12 +140,14 @@ def loo_loop(args: Tuple[ndarray, _UnionHandling, _Normalization]) -> Optional[n
 def loo_consistencies(
     y_errs: List[ndarray],
     empty_unions: _UnionHandling = "0",
-    parallel: bool = False,
+    parallel: Union[bool, int] = False,
     norm: _Normalization = "",
+    show_progress: bool = True,
 ) -> ndarray:
     L = len(y_errs)
-    loo_sets = combinations(y_errs, L - 1)  # leave-one out
-    if parallel:
+    loo_sets = list(combinations(y_errs, L - 1))  # leave-one out
+    if parallel is not False:
+        cpus = cpu_count() if parallel is True else int(parallel)
         args = [(lsets, empty_unions, norm) for lsets in loo_sets]
         # https://stackoverflow.com/questions/53751050/python-multiprocessing-understanding-logic-behind-chunksize
         chunksize = divmod(L, cpu_count() * 20)[0]
@@ -153,16 +155,17 @@ def loo_consistencies(
         consistencies = process_map(
             loo_loop,
             args,
-            max_workers=cpu_count(),
+            max_workers=cpus,
             chunksize=chunksize,
             desc="Computing leave-one-out error consistencies",
             total=L,
+            disable=not show_progress,
         )
         if empty_unions == "drop":
-            consistencies = np.array(filter(lambda c: c is None, consistencies))
+            consistencies = np.array(list(filter(lambda c: c is None, consistencies)))
         if empty_unions == "nan":
             consistencies = np.array(
-                map(lambda c: np.nan if c is None else c, consistencies)  # type: ignore
+                list(map(lambda c: np.nan if c is None else c, consistencies))  # type: ignore
             )
     else:
         consistencies = []
@@ -195,6 +198,14 @@ def loo_consistencies(
 
 
 def get_y_error(y_pred: ndarray, y_true: ndarray, sample_dim: int = 0) -> ndarray:
+    """Returns the
+
+    Returns
+    -------
+    error_set: ndarray
+        The boolean array with length `n_samples` where y_pred != y_true. For one-hot or dummy `y`,
+        this is still computed such that the length of the returned array is `n_samples`.
+    """
     if y_pred.ndim != y_true.ndim:
         raise ValueError("`y_pred` and `y_true` must have the same dimensionality.")
     sample_dim = int(np.abs(sample_dim))
@@ -224,7 +235,7 @@ def error_consistencies(
     y_true: ndarray,
     sample_dim: int = 0,
     empty_unions: UnionHandling = 0,
-    loo_parallel: bool = False,
+    loo_parallel: Union[bool, int] = False,
     turbo: bool = False,
     log_progress: bool = False,
 ) -> Tuple[ndarray, ndarray, ndarray, ndarray, ndarray]:
@@ -308,7 +319,9 @@ def error_consistencies(
     predictable_set = union(y_errs)
     if log_progress:
         print("Computing Leave-One-Out error consistencies ... ", end="", flush=True)
-    loocs = loo_consistencies(y_errs, empty_unions, loo_parallel)  # type: ignore
+    loocs = loo_consistencies(
+        y_errs, empty_unions, loo_parallel, show_progress=log_progress  # type: ignore
+    )
     if log_progress:
         print("done.")
 
@@ -323,5 +336,5 @@ def error_consistencies(
         if log_progress:
             print("done.")
     else:
-        consistencies, matrix = error_consistencies_slow(y_errs, empty_unions)
+        consistencies, matrix = error_consistencies_slow(y_errs, empty_unions)  # type: ignore
     return (np.array(consistencies), matrix, unpredictable_set, predictable_set, loocs)
