@@ -1,3 +1,11 @@
+import warnings
+
+# These *should* be safe to ignore, see
+# https://stackoverflow.com/questions/40845304/runtimewarning-numpy-dtype-size-changed-may-indicate-binary-incompatibility
+warnings.filterwarnings("ignore", message="numpy.ndarray size changed")
+warnings.filterwarnings("ignore", message="numpy.dtype size changed")
+warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
+
 from pathlib import Path
 from pprint import pprint
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
@@ -13,7 +21,8 @@ from numpy import ndarray
 from pandas import DataFrame, Series
 
 from pytorch_lightning import LightningDataModule, LightningModule, Trainer
-from pytorch_lightning.metrics.functional import accuracy
+from torchmetrics.functional import accuracy
+from torchmetrics.metric import Metric
 from torch import Tensor, nn
 from torch.nn import Conv2d, Linear, ReLU, Module, BatchNorm2d, Sequential, Softmax
 from torch.optim.optimizer import Optimizer
@@ -29,6 +38,23 @@ from error_consistency.constants import LIB_ROOT
 
 PT_SAVEDIR = LIB_ROOT / "error_consistency/deep"
 SIZE = (32, 32)
+
+
+class SmoothedAcc(Metric):
+    def __init__(self, n_back: int = 10):
+        super().__init__(
+            compute_on_step=True, dist_sync_on_step=False, process_group=None, dist_sync_fn=None
+        )
+        self.add_state("val_preds", [], dist_reduce_fx="cat")
+        self.add_state("val_trues", [], dist_reduce_fx="cat")
+        self.n_back = n_back
+        pass
+
+    def update(self, preds: Tensor, target: Tensor) -> None:
+        pass
+
+    def compute(self):
+        pass
 
 
 class ConvUnit(Module):
@@ -151,14 +177,14 @@ class FMnistCNN(LightningModule):
         # training_step defined the train loop. It is independent of forward
         loss, acc = self.generic_step(batch)
         self.log("train_loss", loss)
-        self.log("train_acc", acc)
+        self.log("train_acc", acc, prog_bar=True)
         return loss
 
     @no_type_check
     def validation_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int) -> None:
         loss, acc = self.generic_step(batch)
-        self.log("val_loss", loss)
-        self.log("val_acc", acc)
+        self.log("val_loss", loss, prog_bar=True)
+        self.log("val_acc", acc, prog_bar=True)
 
     @no_type_check
     def test_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int) -> None:
@@ -182,10 +208,10 @@ class FMnistCNN(LightningModule):
 
 def test_prelim(capsys: CaptureFixture) -> None:
     with capsys.disabled():
-        HPARAMS: Dict = dict(batch_size=256, depth=4, width=8)
+        HPARAMS: Dict = dict(batch_size=256, depth=5, width=8)
         dm = FmnistDM(HPARAMS)  # type: ignore
         model = FMnistCNN(HPARAMS)
-        trainer = Trainer(gpus=1, max_epochs=1)
+        trainer = Trainer(gpus=1, max_epochs=5)
         trainer.fit(model, dm)  # type: ignore
         result = trainer.test()[0]
         pprint(result)
