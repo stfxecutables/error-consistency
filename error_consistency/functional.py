@@ -3,17 +3,16 @@ from __future__ import annotations
 from functools import reduce
 from itertools import combinations
 from multiprocessing import cpu_count
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 from warnings import warn
 
 import numpy as np
-from numba import prange, jit
+from numba import jit, prange
 from numpy import ndarray
 from pandas import DataFrame, Series
-from typing import Optional
+from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 from typing_extensions import Literal
-from tqdm import tqdm
 
 from error_consistency.utils import to_numpy
 
@@ -27,7 +26,7 @@ Normalization = Literal[None, "length", "intersection"]
 _Normalization = Literal["", "length", "intersection"]
 
 
-@jit(nopython=True, parallel=True, cache=True)
+@jit(nopython=True, parallel=True)
 def error_consistencies_numba(
     y_errs: ndarray, empty_unions: _UnionHandling = "nan", norm: _Normalization = ""
 ) -> ndarray:
