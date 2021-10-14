@@ -606,7 +606,8 @@ def plot_correlated_tables(use_3d: bool = False, show: bool = True) -> None:
     if use_3d:
         # just plot x =n, y = k, ECs, percentiles = colors
         sbn.set_style("white")
-        palette = sbn.color_palette("Spectral", as_cmap=True)
+        # palette = sbn.color_palette("Spectral", as_cmap=True)
+        palette = sbn.color_palette("icefire", as_cmap=True)
         fig = plt.figure()
         ax1 = fig.add_subplot(1, 2, 1, projection="3d", azim=-163, elev=11)
         ax2 = fig.add_subplot(1, 2, 2, projection="3d", azim=-66, elev=11)
@@ -635,7 +636,8 @@ def plot_correlated_tables(use_3d: bool = False, show: bool = True) -> None:
         return
 
     sbn.set_style("darkgrid")
-    palette = sbn.dark_palette("#ff5900", as_cmap=True)
+    # palette = sbn.dark_palette("#ff5900", as_cmap=True)
+    palette = sbn.color_palette("icefire", as_cmap=True)
     fig, ax = plt.subplots()
 
     # plot perturbed
@@ -672,4 +674,4 @@ def test_plot_results(capsys: CaptureFixture) -> None:
     # plot_k_tables(use_3d=False, show=False)
     # plot_k_tables(use_3d=True, show=False)
     plot_correlated_tables(use_3d=True, show=False)
-    # plot_correlated_tables(use_3d=False, show=False)
+    plot_correlated_tables(use_3d=False, show=False)
