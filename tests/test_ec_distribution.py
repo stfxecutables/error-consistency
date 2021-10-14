@@ -1,24 +1,36 @@
 import timeit
 from argparse import Namespace
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union, cast, no_type_check
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
+import seaborn as sbn
 from _pytest.capture import CaptureFixture
+from matplotlib import ticker
+from mpl_toolkits import mplot3d
 from numba import jit, prange
 from numpy import ndarray
 from numpy.random import Generator
-from pandas import DataFrame
+from pandas import DataFrame, Series
 from sklearn.model_selection import ParameterGrid
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
+from typing_extensions import Literal
 
 from error_consistency.functional import error_consistencies, error_consistencies_numba, get_y_error
 
 OUTDIR = Path(__file__).resolve().parent / "test_results"
 NUM_SAMPLES = 10000
+OUTPUTS = dict(
+    n_random_k=OUTDIR / "n_random_k_max_10000samples.csv",
+    n_fixed_k=OUTDIR / "n_fixed_k_10000samples.csv",
+    perturbed=OUTDIR / "n_perturbed_k_1000samples.csv",
+    binomial=OUTDIR / "n_binomial_1000samples.csv",
+    correlated=OUTDIR / "n_correlated_1000samples.csv",
+)
 
 
 @jit(nopython=True, parallel=True)
@@ -59,6 +71,50 @@ def n_correlated_errs(n: int, gamma: float, num_errors: int) -> np.ndarray:
     cs = matrix[np.triu_indices_from(matrix, 1)].ravel()
     cs = cs[~np.isnan(cs)]
     # compute average distance between errs
+    d = np.nanmean(average_distance(y_errs))
+    return cs, d
+
+
+def n_binomial_errs(n: int, p: float, num_errors: int) -> Tuple[ndarray, ndarray]:
+    rng: Generator = np.random.default_rng()
+    y_errs = []
+    y_errs = rng.binomial(1, p, [num_errors, n])
+    # for i in range(num_errors):
+    #     k = rng.integers(0, n + 1)
+    #     errs = np.concatenate([np.ones(k, dtype=bool), np.zeros(n - k, dtype=bool)])
+    #     y_errs.append(rng.choice(errs, size=n, p=p, replace=True))
+    # y_errs = np.array(y_errs)
+    matrix = error_consistencies_numba(y_errs, empty_unions="nan")
+    cs = matrix[np.triu_indices_from(matrix, 1)].ravel()
+    cs = cs[~np.isnan(cs)]
+    # compute average distance between errs
+    d = np.nanmean(average_distance(y_errs))
+    return cs, d
+
+
+def n_perturbed_k_errs(
+    n: int, k_base: int, noise: float, num_errors: int
+) -> Tuple[ndarray, ndarray]:
+    """Generate correlated errors by adding a 'noise' vector to a base error vector
+
+    n: int
+        Total error set size
+
+    k_base: int
+        Number of base errors to start with.
+
+    p: int
+        Noise value for Bernoulli noise.
+    """
+    rng: Generator = np.random.default_rng()
+    errs = np.concatenate([np.ones(k_base, dtype=bool), np.zeros(n - k_base, dtype=bool)])
+    y_errs = []
+    for i in range(num_errors):
+        noise_vec = rng.binomial(1, noise, size=n)
+        y_errs.append(errs ^ noise_vec)  # use XOR so we aren't just increasing amount of 1s
+    matrix = error_consistencies_numba(np.array(y_errs), empty_unions="nan")
+    cs = matrix[np.triu_indices_from(matrix, 1)].ravel()
+    cs = cs[~np.isnan(cs)]
     d = np.nanmean(average_distance(y_errs))
     return cs, d
 
@@ -267,6 +323,53 @@ def get_n_correlated_info(args: Namespace) -> Optional[DataFrame]:
     )
 
 
+def get_n_binomial_info(args: Namespace) -> Optional[DataFrame]:
+    n, p = args.n, args.p
+    ecs, d = n_binomial_errs(n, p, args.num_samples)
+    mn, p5, p25, med, p75, p95, mx = np.percentile(ecs, [0, 5, 25, 50, 75, 95, 100])
+    return pd.DataFrame(
+        {
+            "n": n,
+            "p": p,
+            "similarity": 1 - d,
+            "mean EC": np.mean(ecs),
+            "sd EC": np.std(ecs, ddof=1),
+            "min EC": mn,
+            "5th pctile": p5,
+            "25th pctile": p25,
+            "median": med,
+            "75th pctile": p75,
+            "95th pctile": p95,
+            "max EC": mx,
+        },
+        index=[0],
+    )
+
+
+def get_n_perturbed_k_info(args: Namespace) -> Optional[DataFrame]:
+    n, k_base, noise = args.n, args.k_base, args.noise
+    ecs, d = n_perturbed_k_errs(n, k_base, noise, args.num_samples)
+    mn, p5, p25, med, p75, p95, mx = np.percentile(ecs, [0, 5, 25, 50, 75, 95, 100])
+    return pd.DataFrame(
+        {
+            "n": n,
+            "k_base": k_base,
+            "noise": noise,
+            "similarity": 1 - d,
+            "mean EC": np.mean(ecs),
+            "sd EC": np.std(ecs, ddof=1),
+            "min EC": mn,
+            "5th pctile": p5,
+            "25th pctile": p25,
+            "median": med,
+            "75th pctile": p75,
+            "95th pctile": p95,
+            "max EC": mx,
+        },
+        index=[0],
+    )
+
+
 def test_n_fixed_k_errs(capsys: CaptureFixture) -> None:
     ns = [5, 10, 25, 50, 100, 250, 500, 1000]
     ks = []
@@ -343,3 +446,129 @@ def test_n_correlated_errs(capsys: CaptureFixture) -> None:
         print(f"Saved results to {outfile}")
         pd.options.display.max_rows = 999
         print(df)
+
+
+def test_n_binomial_errs(capsys: CaptureFixture) -> None:
+    NUM_SAMPLES = 1000
+    with capsys.disabled():
+        grid = list(
+            ParameterGrid(
+                dict(
+                    n=[5, 10, 25, 50, 100, 250, 500, 1000, 5000],
+                    p=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+                    num_samples=[NUM_SAMPLES],
+                )
+            )
+        )
+        args = [Namespace(**g) for g in grid]
+        dfs = process_map(get_n_binomial_info, args, max_workers=8)
+        df = pd.concat(dfs, axis=0, ignore_index=True).sort_values(by=["n", "p", "similarity"])
+        outfile = OUTDIR / f"n_binomial_{NUM_SAMPLES}samples.csv"
+        df.to_csv(outfile)
+        print(f"Saved results to {outfile}")
+        pd.options.display.max_rows = 999
+        print(df)
+
+
+def test_n_perturbed_errs(capsys: CaptureFixture) -> None:
+    NUM_SAMPLES = 1000
+    ns = [5, 10, 25, 50, 100, 250, 500, 1000]
+    ks = []
+    for n in ns:
+        ks.extend([int(perc * n) for perc in [0.1, 0.2, 0.4, 0.6, 0.8, 0.9]])
+    ks = np.unique(ks)
+    with capsys.disabled():
+        grid = list(
+            ParameterGrid(
+                dict(
+                    n=ns,
+                    k_base=ks,
+                    noise=np.arange(0.05, 1.0, 0.05),
+                    num_samples=[NUM_SAMPLES],
+                )
+            )
+        )
+        args = [Namespace(**g) for g in grid if g["k_base"] < g["n"]]
+        dfs = process_map(get_n_perturbed_k_info, args, max_workers=8)
+        df = pd.concat(dfs, axis=0, ignore_index=True).sort_values(
+            by=["n", "k_base", "noise", "similarity"]
+        )
+        outfile = OUTDIR / f"n_perturbed_k_{NUM_SAMPLES}samples.csv"
+        df.to_csv(outfile)
+        print(f"Saved results to {outfile}")
+        pd.options.display.max_rows = 9999
+        print(df)
+
+
+def best_rect(m: int) -> Tuple[int, int]:
+    """returns dimensions (smaller, larger) of closest rectangle"""
+    low = int(np.floor(np.sqrt(m)))
+    high = int(np.ceil(np.sqrt(m)))
+    prods = [(low, low), (low, low + 1), (high, high), (high, high + 1)]
+    for i, prod in enumerate(prods):
+        if prod[0] * prod[1] >= m:
+            return prod
+    raise ValueError("Unreachable!")
+
+
+def plot_k_tables(use_3d: bool = False) -> None:
+    df_k = pd.read_csv(OUTPUTS["n_fixed_k"]).iloc[:, 1:]  # ignore stupid csv index
+    df_kmax = pd.read_csv(OUTPUTS["n_random_k"]).iloc[:, 1:]
+    if use_3d:
+        # just plot x =n, y = k, ECs, percentiles = colors
+        fig = plt.figure()
+        ax = plt.axes(projection="3d")
+        x, y, z = df_k["n"], df_k["k"], df_k["mean EC"]
+        ax.scatter3D(x, y, z, s=100 * df_k["sd EC"], color="black")
+        ax.set_xlabel("n")
+        ax.set_ylabel("k")
+        ax.set_zlabel("mean EC")
+        plt.show()
+        return
+    fig, axes = plt.subplots(ncols=2)
+
+    # plot fixed k
+    x, k, y, sd = df_k["n"], df_k["k"], df_k["mean EC"], df_k["sd EC"]
+    k /= x
+    k.name = "k/n"
+    sbn.scatterplot(
+        x=x,
+        y=y,
+        hue=k,
+        size=10 * sd,
+        ax=axes[0],
+        palette=sbn.color_palette("mako", as_cmap=True),
+    )
+    axes[0].set_xscale("log")
+    axes[0].set_yscale("log")
+    axes[0].set_title("EC with Total Error set size n and fixed k random errors")
+    axes[0].set_xlabel("n (log scale)")
+    axes[0].set_ylabel("EC (log scale)")
+    axes[0].yaxis.set_major_formatter(ticker.ScalarFormatter())
+    axes[0].xaxis.set_major_formatter(ticker.ScalarFormatter())
+
+    # plot random k_max
+    x, k, y, sd = df_kmax["n"], df_kmax["k_max"], df_kmax["mean EC"], df_kmax["sd EC"]
+    k /= x
+    k.name = "k_max/n"
+    sbn.scatterplot(
+        x=x,
+        y=y,
+        hue=k,
+        size=10 * sd,
+        ax=axes[1],
+        palette=sbn.color_palette("mako", as_cmap=True),
+    )
+    axes[1].set_xscale("log")
+    axes[1].set_yscale("log")
+    axes[1].set_title("EC with Total Error set size n and up to k random errors")
+    axes[1].set_xlabel("n (log scale)")
+    axes[1].set_ylabel("EC (log scale)")
+    axes[1].yaxis.set_major_formatter(ticker.ScalarFormatter())
+    axes[1].xaxis.set_major_formatter(ticker.ScalarFormatter())
+    fig.set_size_inches(w=12, h=6)
+    plt.show()
+
+
+def test_plot_results(capsys: CaptureFixture) -> None:
+    plot_k_tables()
