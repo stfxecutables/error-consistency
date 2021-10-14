@@ -11,6 +11,7 @@ import seaborn as sbn
 from _pytest.capture import CaptureFixture
 from matplotlib import ticker
 from mpl_toolkits import mplot3d
+from mpl_toolkits.mplot3d.axes3d import Axes3D
 from numba import jit, prange
 from numpy import ndarray
 from numpy.random import Generator
@@ -95,7 +96,12 @@ def n_binomial_errs(n: int, p: float, num_errors: int) -> Tuple[ndarray, ndarray
 def n_perturbed_k_errs(
     n: int, k_base: int, noise: float, num_errors: int
 ) -> Tuple[ndarray, ndarray]:
-    """Generate correlated errors by adding a 'noise' vector to a base error vector
+    """Generate correlated errors by adding a 'noise' vector to a base error vector. Basically,
+    a XOR 1 flips a bit. (0 ^ 1) = 1, (1 ^ 1) = 0. So given an error set `e`, and noise vector `noise`,
+    where noise is sampled from a binomial with noise `p`, `e ^ noise` gives us a new perturbed error
+    vector with the amount of bits flipped depending on `p`. As `p` approaches 1, we flip all bits, so
+    all errors become the same, so this is actually max correlation. Same with `p` == 0. So we really
+    need to vary `p` between 0 and 0.5, where 0.5 is maximum noise.
 
     n: int
         Total error set size
@@ -483,7 +489,7 @@ def test_n_perturbed_errs(capsys: CaptureFixture) -> None:
                 dict(
                     n=ns,
                     k_base=ks,
-                    noise=np.arange(0.05, 1.0, 0.05),
+                    noise=np.arange(0.05, 0.55, 0.05),
                     num_samples=[NUM_SAMPLES],
                 )
             )
@@ -511,39 +517,58 @@ def best_rect(m: int) -> Tuple[int, int]:
     raise ValueError("Unreachable!")
 
 
-def plot_k_tables(use_3d: bool = False) -> None:
+def plot_k_tables(use_3d: bool = False, show: bool = False) -> None:
     df_k = pd.read_csv(OUTPUTS["n_fixed_k"]).iloc[:, 1:]  # ignore stupid csv index
     df_kmax = pd.read_csv(OUTPUTS["n_random_k"]).iloc[:, 1:]
     if use_3d:
         # just plot x =n, y = k, ECs, percentiles = colors
+        sbn.set_style("white")
+        palette = sbn.color_palette("Spectral", as_cmap=True)
         fig = plt.figure()
-        ax = plt.axes(projection="3d")
+        ax1 = fig.add_subplot(1, 2, 1, projection="3d", azim=-26, elev=15)
+        ax2 = fig.add_subplot(1, 2, 2, projection="3d", azim=-128, elev=3)
         x, y, z = df_k["n"], df_k["k"], df_k["mean EC"]
-        ax.scatter3D(x, y, z, s=100 * df_k["sd EC"], color="black")
-        ax.set_xlabel("n")
-        ax.set_ylabel("k")
-        ax.set_zlabel("mean EC")
-        plt.show()
+        sd = 100 * df_k["sd EC"]
+
+        for ax in [ax1, ax2]:
+            ax.scatter3D(x, y, z, s=sd, cmap=palette)
+            ax.set_xlabel("n")
+            ax.set_ylabel("k")
+            ax.set_zlabel("mean EC")
+        fig.set_size_inches(w=9, h=4)
+        fig.suptitle("AEC with Total Error set size n\n fixed size k error sets")
+        fig.subplots_adjust(top=1.0, bottom=0.0, left=0.05, right=0.95, hspace=0.2, wspace=0.3)
+        if show:
+            plt.show()
+        else:
+            fig.savefig(OUTDIR / f"n_k_AECs_3d.png", dpi=300)
+            plt.close()
         return
+    sbn.set_style("darkgrid")
+    # palette = sbn.color_palette("mako", as_cmap=True)
+    # palette = sbn.color_palette("rocket", as_cmap=True)
+    # palette = sbn.color_palette("Spectral", as_cmap=True)
+    palette = sbn.dark_palette("#0084ff", as_cmap=True)
     fig, axes = plt.subplots(ncols=2)
 
     # plot fixed k
     x, k, y, sd = df_k["n"], df_k["k"], df_k["mean EC"], df_k["sd EC"]
     k /= x
     k.name = "k/n"
+    y.name = "AEC"
     sbn.scatterplot(
         x=x,
         y=y,
         hue=k,
-        size=10 * sd,
+        size=sd,
         ax=axes[0],
-        palette=sbn.color_palette("mako", as_cmap=True),
+        palette=palette,
     )
     axes[0].set_xscale("log")
     axes[0].set_yscale("log")
     axes[0].set_title("EC with Total Error set size n and fixed k random errors")
-    axes[0].set_xlabel("n (log scale)")
-    axes[0].set_ylabel("EC (log scale)")
+    axes[0].set_xlabel("n")
+    axes[0].set_ylabel("EC")
     axes[0].yaxis.set_major_formatter(ticker.ScalarFormatter())
     axes[0].xaxis.set_major_formatter(ticker.ScalarFormatter())
 
@@ -551,24 +576,100 @@ def plot_k_tables(use_3d: bool = False) -> None:
     x, k, y, sd = df_kmax["n"], df_kmax["k_max"], df_kmax["mean EC"], df_kmax["sd EC"]
     k /= x
     k.name = "k_max/n"
+    y.name = "AEC"
     sbn.scatterplot(
         x=x,
         y=y,
         hue=k,
-        size=10 * sd,
+        size=sd,
         ax=axes[1],
-        palette=sbn.color_palette("mako", as_cmap=True),
+        palette=palette,
     )
     axes[1].set_xscale("log")
     axes[1].set_yscale("log")
     axes[1].set_title("EC with Total Error set size n and up to k random errors")
-    axes[1].set_xlabel("n (log scale)")
-    axes[1].set_ylabel("EC (log scale)")
+    axes[1].set_xlabel("n")
+    axes[1].set_ylabel("EC")
     axes[1].yaxis.set_major_formatter(ticker.ScalarFormatter())
     axes[1].xaxis.set_major_formatter(ticker.ScalarFormatter())
     fig.set_size_inches(w=12, h=6)
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        fig.savefig(OUTDIR / f"n_k_AECs.png", dpi=300)
+        plt.close()
+    return
+
+
+def plot_correlated_tables(use_3d: bool = False, show: bool = True) -> None:
+    perturbed = pd.read_csv(OUTPUTS["perturbed"]).iloc[:, 1:]  # ignore stupid csv index
+    if use_3d:
+        # just plot x =n, y = k, ECs, percentiles = colors
+        sbn.set_style("white")
+        palette = sbn.color_palette("Spectral", as_cmap=True)
+        fig = plt.figure()
+        ax1 = fig.add_subplot(1, 2, 1, projection="3d", azim=-163, elev=11)
+        ax2 = fig.add_subplot(1, 2, 2, projection="3d", azim=-66, elev=11)
+        df = perturbed
+        x = df["k_base"] / df["n"]
+        z = df["mean EC"]
+        x.name = "k_base / n"
+        z.name = "AEC"
+        y = df["noise"]
+        for ax in [ax1, ax2]:
+            # ax.scatter3D(x, y, z, s=100 * df["sd EC"], color="#004ca3")
+            ax.plot_trisurf(x, y, z, cmap=palette, lw=0.1)
+            ax.set_xlabel(x.name)
+            ax.set_ylabel(y.name)
+            ax.set_zlabel(z.name)
+        fig.set_size_inches(w=9, h=4)
+        fig.suptitle(
+            "AEC with Total Error set size n\nerror sets perturbed from base set of fixed k_base errors"
+        )
+        fig.subplots_adjust(top=1.0, bottom=0.0, left=0.05, right=0.95, hspace=0.2, wspace=0.026)
+        if show:
+            plt.show()
+        else:
+            fig.savefig(OUTDIR / f"perturbation_3d.png", dpi=300)
+            plt.close()
+        return
+
+    sbn.set_style("darkgrid")
+    palette = sbn.dark_palette("#ff5900", as_cmap=True)
+    fig, ax = plt.subplots()
+
+    # plot perturbed
+    # remove erroneous choices of noise
+    # perturbed = perturbed.loc[perturbed["noise"] <= 0.8]
+    # perturbed["noise"] = perturbed["noise"].apply(lambda x: 1 - x if x > 0.5 else x)
+    n, k_base, y, sd = perturbed["n"], perturbed["k_base"], perturbed["mean EC"], perturbed["sd EC"]
+    x = k_base / n
+    x.name = "k_base / n"
+    y.name = "AEC"
+    noise = perturbed["noise"]
+    sbn.scatterplot(x=x, y=y, hue=noise, size=k_base, ax=ax, palette=palette, alpha=0.7)
+    ax.set_title(
+        "AEC with Total Error set size n\nerror sets perturbed from base set of fixed k_base errors"
+    )
+    ax.set_xlabel("k_base / n")
+    ax.set_ylabel("AEC")
+    ax.yaxis.set_major_formatter(ticker.ScalarFormatter())
+    ax.xaxis.set_major_formatter(ticker.ScalarFormatter())
+    # axes[0].yaxis.set_minor_formatter(None)
+    # axes[0].xaxis.set_minor_formatter(None)
+    fig.legend(*ax.get_legend_handles_labels())
+    ax.get_legend().remove()
+    fig.set_size_inches(w=12, h=7)
+    if show:
+        plt.show()
+    else:
+        fig.savefig(OUTDIR / f"perturbation_2d.png", dpi=300)
+        plt.close()
+    return
 
 
 def test_plot_results(capsys: CaptureFixture) -> None:
-    plot_k_tables()
+    # plot_k_tables(use_3d=False, show=False)
+    # plot_k_tables(use_3d=True, show=False)
+    plot_correlated_tables(use_3d=True, show=False)
+    # plot_correlated_tables(use_3d=False, show=False)
